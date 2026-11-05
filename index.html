@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Beam Token</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Signal4 Beam</p>
+        <h1>API token</h1>
+        <p class="lede">
+          Open the encrypted credentials file Signal4 sent you, unlock it with
+          your passphrase, then copy a short-lived access token.
+        </p>
+      </header>
+
+      <section class="card" id="file-card">
+        <div class="card-head">
+          <span class="num">1</span>
+          <h2>Encrypted file</h2>
+        </div>
+        <p class="hint">
+          Drop the <code>.asc</code> file here, or choose it from disk. This is
+          the file Signal4 encrypted for you, not your public key.
+        </p>
+        <div id="dropzone" class="dropzone" tabindex="0">
+          <button type="button" id="choose-file" class="secondary">Choose file</button>
+          <p id="file-name">No file selected</p>
+        </div>
+      </section>
+
+      <section class="card" id="pass-card">
+        <div class="card-head">
+          <span class="num">2</span>
+          <h2>Unlock</h2>
+        </div>
+        <label for="passphrase">Private key passphrase</label>
+        <div class="pass-row">
+          <input
+            id="passphrase"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Passphrase you created with the key"
+          />
+          <button type="button" id="toggle-pass" class="secondary" aria-pressed="false">
+            Show
+          </button>
+        </div>
+        <button type="button" id="decrypt" class="primary">Decrypt credentials</button>
+      </section>
+
+      <section class="card" id="ready-card" hidden>
+        <div class="card-head">
+          <span class="num">3</span>
+          <h2>Get a token</h2>
+        </div>
+        <p id="ready-copy"></p>
+        <dl>
+          <div>
+            <dt>File</dt>
+            <dd id="sum-file"></dd>
+          </div>
+          <div>
+            <dt>Client id</dt>
+            <dd id="sum-id"></dd>
+          </div>
+          <div>
+            <dt>Credentials expire</dt>
+            <dd id="sum-exp"></dd>
+          </div>
+        </dl>
+        <button type="button" id="get-token" class="primary">Get API token</button>
+      </section>
+
+      <section class="card" id="token-card" hidden>
+        <div class="card-head">
+          <span class="num">4</span>
+          <h2>Access token</h2>
+        </div>
+        <p id="token-meta"></p>
+        <textarea id="token" readonly rows="3" spellcheck="false"></textarea>
+        <div class="actions">
+          <button type="button" id="copy" class="primary">Copy token</button>
+          <button type="button" id="refresh" class="secondary">Get a new token</button>
+        </div>
+      </section>
+
+      <p id="status" role="status"></p>
+    </main>
+  </body>
+</html>
