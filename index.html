@@ -155,138 +155,183 @@
             </div>
           </section>
 
-          <section class="view" data-view="search" id="view-search" hidden>
-            <section class="card search-card" id="search-card">
-              <div class="card-head">
-                <h2>Crash event search</h2>
-              </div>
-              <p class="hint">
-                Read-only search of <code>/crash-event/v1/search</code>. At least one
-                date filter is required. Results stay in this window and are not written to disk.
-              </p>
-              <div class="session-row">
-                <p id="session-note"></p>
-                <div class="actions">
-                  <button type="button" id="search-go-token" class="secondary">Get API Token</button>
-                  <button type="button" id="search-go-settings" class="secondary">Settings</button>
+          <section class="view search-view" data-view="search" id="view-search" hidden>
+            <div class="search-tabs" role="tablist" aria-label="Crash event search">
+              <button type="button" class="search-tab" id="tab-form" role="tab" aria-selected="true" aria-controls="panel-form">Search</button>
+              <button type="button" class="search-tab" id="tab-table" role="tab" aria-selected="false" aria-controls="panel-table">Results</button>
+            </div>
+
+            <div class="search-panel" id="panel-form" role="tabpanel" aria-labelledby="tab-form">
+              <section class="card search-card" id="search-card">
+                <div class="card-head">
+                  <h2>Crash event search</h2>
+                  <button type="button" id="search-help" class="icon-btn" aria-expanded="false" aria-controls="search-help-panel" aria-label="Ways to search" title="Ways to search">i</button>
                 </div>
-              </div>
-
-              <div class="use-cases">
-                <h3>Ways to search</h3>
-                <ul>
-                  <li><strong>One day of crashes.</strong> Crash date, single day, such as <code>2026-01-01</code>.</li>
-                  <li><strong>A span of crash dates.</strong> Crash date range, sent as <code>2025-12-01~2025-12-31</code>.</li>
-                  <li><strong>Records touched at one moment.</strong> Update time, single timestamp, such as <code>2026-08-01T00:00:00</code>.</li>
-                  <li><strong>Records touched during a window.</strong> Update time range, such as <code>2026-07-15T00:00:00~2026-07-15T23:59:59</code>.</li>
-                  <li><strong>Crashes in one period that changed in another.</strong> Set both filters. Example: crashes in January 2026 and updates in March 2026.</li>
-                  <li><strong>How many records match.</strong> Get Overview Summary. Page is left off, and the table is replaced by totals.</li>
-                  <li><strong>A page of records.</strong> Search records with page 1 or higher. Each page holds 500 records. A page past the end returns an empty list.</li>
-                </ul>
-              </div>
-
-              <form id="crash-search-form" class="search-form" novalidate>
-                <fieldset id="crash-field">
-                  <legend>Crash date</legend>
-                  <p class="hint">When the crash occurred. <code>YYYY-MM-DD</code>, through today. A range joins the days with <code>~</code>.</p>
-                  <label for="crash-mode">How to match</label>
-                  <select id="crash-mode">
-                    <option value="off">Not used</option>
-                    <option value="single" selected>Single day</option>
-                    <option value="range">Date range</option>
-                  </select>
-                  <div id="crash-single">
-                    <label for="crash-day">Day</label>
-                    <input id="crash-day" type="date" />
-                  </div>
-                  <div id="crash-range" hidden>
-                    <div class="range-grid">
-                      <div>
-                        <label for="crash-start">Start</label>
-                        <input id="crash-start" type="date" />
-                      </div>
-                      <div>
-                        <label for="crash-end">End</label>
-                        <input id="crash-end" type="date" />
-                      </div>
-                    </div>
-                  </div>
-                </fieldset>
-
-                <fieldset id="update-field">
-                  <legend>Update time</legend>
-                  <p class="hint">When Signal4 last updated the record. <code>YYYY-MM-DDTHH:mm:ss</code>, through now. A range joins the timestamps with <code>~</code>.</p>
-                  <label for="update-mode">How to match</label>
-                  <select id="update-mode">
-                    <option value="off" selected>Not used</option>
-                    <option value="single">Single timestamp</option>
-                    <option value="range">Time range</option>
-                  </select>
-                  <div id="update-single" hidden>
-                    <label for="update-at">Timestamp</label>
-                    <input id="update-at" type="datetime-local" step="1" />
-                  </div>
-                  <div id="update-range" hidden>
-                    <div class="range-grid">
-                      <div>
-                        <label for="update-start">Start</label>
-                        <input id="update-start" type="datetime-local" step="1" />
-                      </div>
-                      <div>
-                        <label for="update-end">End</label>
-                        <input id="update-end" type="datetime-local" step="1" />
-                      </div>
-                    </div>
-                  </div>
-                </fieldset>
-
-                <p id="slow-note" class="warn span-2" hidden>
-                  This search uses only the update time, so Beam scans the full table and the response can be slow. Narrow the window, or add a crash date range.
+                <div id="search-help-panel" class="help-pop use-cases" hidden>
+                  <h3>Ways to search</h3>
+                  <ul>
+                    <li><strong>One day of crashes.</strong> Crash date, single day, such as <code>2026-01-01</code>.</li>
+                    <li><strong>A span of crash dates.</strong> Crash date range, sent as <code>2025-12-01~2025-12-31</code>.</li>
+                    <li><strong>Records touched at one moment.</strong> Update time, single timestamp, such as <code>2026-08-01T00:00:00</code>.</li>
+                    <li><strong>Records touched during a window.</strong> Update time range, such as <code>2026-07-15T00:00:00~2026-07-15T23:59:59</code>.</li>
+                    <li><strong>Crashes in one period that changed in another.</strong> Set both filters. Example: crashes in January 2026 and updates in March 2026.</li>
+                    <li><strong>How many records match.</strong> Totals load automatically once a date filter is complete. Page is left off that request.</li>
+                    <li><strong>A range of Beam pages.</strong> Each API page holds 500 records. Search fetches every page in the from–to range.</li>
+                  </ul>
+                </div>
+                <p class="hint">
+                  Read-only search of <code>/crash-event/v1/search</code>. At least one
+                  date filter is required. Results stay in this window and are not written to disk.
                 </p>
-
-                <div class="actions span-2">
-                  <button type="submit" id="search-records" class="primary">Search records</button>
-                  <button type="button" id="search-summary" class="secondary">Get Overview Summary</button>
-                </div>
-                <p id="query-preview" class="query-preview span-2"></p>
-
-                <div id="search-error" class="error-box span-2" role="alert" hidden>
-                  <p id="error-code" class="error-code"></p>
-                  <p id="error-message" class="error-message"></p>
-                  <p id="error-details" class="error-details"></p>
-                  <p id="error-cause" class="error-cause"></p>
-                  <p id="error-source" class="error-source"></p>
-                </div>
-
-                <div class="results-toolbar span-2">
-                  <p id="active-query"></p>
-                  <div class="pager">
-                    <button type="button" id="page-prev" class="secondary">Previous</button>
-                    <label for="page">Page
-                      <input id="page" type="number" min="1" step="1" value="1" inputmode="numeric" />
-                    </label>
-                    <button type="button" id="page-go" class="secondary">Go</button>
-                    <button type="button" id="page-next" class="secondary">Next</button>
-                  </div>
-                  <p id="page-meta" class="hint"></p>
-                  <div class="column-tools">
-                    <button type="button" id="toggle-columns" class="secondary" aria-expanded="false" aria-controls="column-panel">Columns</button>
-                    <span id="column-count"></span>
-                    <button type="button" id="export-csv" class="secondary" disabled>Full CSV</button>
-                    <button type="button" id="export-pdf" class="secondary" disabled>PDF</button>
+                <div class="session-row">
+                  <p id="session-note"></p>
+                  <div class="actions">
+                    <button type="button" id="search-go-token" class="secondary">Get API Token</button>
+                    <button type="button" id="search-go-settings" class="secondary">Settings</button>
                   </div>
                 </div>
-              </form>
 
-              <div id="column-panel" class="column-panel" hidden>
+                <form id="crash-search-form" class="search-form" novalidate>
+                  <fieldset id="crash-field">
+                    <legend>Crash date</legend>
+                    <p class="hint">When the crash occurred. <code>YYYY-MM-DD</code>, through today. A range joins the days with <code>~</code>.</p>
+                    <label for="crash-mode">How to match</label>
+                    <select id="crash-mode">
+                      <option value="off">Not used</option>
+                      <option value="single" selected>Single day</option>
+                      <option value="range">Date range</option>
+                    </select>
+                    <div id="crash-single">
+                      <label for="crash-day">Day</label>
+                      <input id="crash-day" type="date" />
+                    </div>
+                    <div id="crash-range" hidden>
+                      <div class="range-grid">
+                        <div>
+                          <label for="crash-start">Start</label>
+                          <input id="crash-start" type="date" />
+                        </div>
+                        <div>
+                          <label for="crash-end">End</label>
+                          <input id="crash-end" type="date" />
+                        </div>
+                      </div>
+                    </div>
+                  </fieldset>
+
+                  <fieldset id="update-field">
+                    <legend>Update time</legend>
+                    <p class="hint">When Signal4 last updated the record. <code>YYYY-MM-DDTHH:mm:ss</code>, through now. A range joins the timestamps with <code>~</code>.</p>
+                    <label for="update-mode">How to match</label>
+                    <select id="update-mode">
+                      <option value="off" selected>Not used</option>
+                      <option value="single">Single timestamp</option>
+                      <option value="range">Time range</option>
+                    </select>
+                    <div id="update-single" hidden>
+                      <label for="update-at">Timestamp</label>
+                      <input id="update-at" type="datetime-local" step="1" />
+                    </div>
+                    <div id="update-range" hidden>
+                      <div class="range-grid">
+                        <div>
+                          <label for="update-start">Start</label>
+                          <input id="update-start" type="datetime-local" step="1" />
+                        </div>
+                        <div>
+                          <label for="update-end">End</label>
+                          <input id="update-end" type="datetime-local" step="1" />
+                        </div>
+                      </div>
+                    </div>
+                  </fieldset>
+
+                  <p id="slow-note" class="warn span-2" hidden>
+                    This search uses only the update time, so Beam scans the full table and the response can be slow. Narrow the window, or add a crash date range.
+                  </p>
+
+                  <fieldset class="span-2" id="page-range-field">
+                    <legend>API page range</legend>
+                    <p class="hint">Beam returns 500 records per page. Search fetches every page in this inclusive range. Results paging on the table tab is separate and local.</p>
+                    <div class="range-grid">
+                      <div>
+                        <label for="page-from">From page</label>
+                        <input id="page-from" type="number" min="1" step="1" value="1" inputmode="numeric" />
+                      </div>
+                      <div>
+                        <label for="page-to">To page</label>
+                        <input id="page-to" type="number" min="1" step="1" value="1" inputmode="numeric" />
+                      </div>
+                    </div>
+                    <div id="overview-panel" class="overview-panel">
+                      <p id="overview-status">Add a crash date, an update time, or both to load match totals.</p>
+                      <dl id="overview-stats" hidden>
+                        <div><dt>Total records</dt><dd id="overview-records">—</dd></div>
+                        <div><dt>Total pages</dt><dd id="overview-pages">—</dd></div>
+                        <div><dt>Page size</dt><dd id="overview-size">—</dd></div>
+                      </dl>
+                    </div>
+                    <p id="fetch-scope" class="warn" hidden></p>
+                  </fieldset>
+
+                  <div class="actions span-2">
+                    <button type="submit" id="search-records" class="primary">Search records</button>
+                  </div>
+                  <p id="query-preview" class="query-preview span-2"></p>
+                  <p id="active-query" class="hint span-2"></p>
+
+                  <div id="search-error" class="error-box span-2" role="alert" hidden>
+                    <p id="error-code" class="error-code"></p>
+                    <p id="error-message" class="error-message"></p>
+                    <p id="error-details" class="error-details"></p>
+                    <p id="error-cause" class="error-cause"></p>
+                    <p id="error-source" class="error-source"></p>
+                  </div>
+                </form>
+              </section>
+            </div>
+
+            <div class="search-panel results-panel" id="panel-table" role="tabpanel" aria-labelledby="tab-table" hidden>
+              <div class="results-toolbar">
+                <p id="table-meta" class="hint"></p>
+                <div class="pager" id="local-pager">
+                  <button type="button" id="view-prev" class="secondary">Previous</button>
+                  <label for="view-page">Page
+                    <input id="view-page" type="number" min="1" step="1" value="1" inputmode="numeric" />
+                  </label>
+                  <label for="view-size">Rows
+                    <select id="view-size">
+                      <option value="25">25</option>
+                      <option value="50" selected>50</option>
+                      <option value="100">100</option>
+                      <option value="250">250</option>
+                      <option value="500">500</option>
+                    </select>
+                  </label>
+                  <button type="button" id="view-next" class="secondary">Next</button>
+                </div>
+                <div class="column-tools">
+                  <button type="button" id="toggle-columns" class="secondary" aria-expanded="false" aria-controls="column-panel">Columns</button>
+                  <span id="column-count"></span>
+                  <button type="button" id="export-csv" class="secondary" disabled>Full CSV</button>
+                  <button type="button" id="export-pdf" class="secondary" disabled>PDF</button>
+                </div>
+              </div>
+              <p id="page-meta" class="hint">Local paging only changes what you see. CSV and PDF still export every fetched record in the columns currently shown.</p>
+
+              <section id="column-panel" class="column-panel" hidden>
+                <div class="column-panel-head">
+                  <h3>Columns</h3>
+                  <button type="button" id="columns-close" class="secondary">Close</button>
+                </div>
+                <p class="hint">Unchecked columns are hidden in the table and omitted from CSV and PDF exports. Check all and uncheck all apply to every column, including ones the search box is hiding.</p>
                 <div class="column-panel-tools">
                   <input id="column-search" type="search" placeholder="Search columns" spellcheck="false" />
                   <button type="button" id="columns-all" class="secondary">Check all</button>
                   <button type="button" id="columns-none" class="secondary">Uncheck all</button>
                 </div>
-                <p class="hint">Check all and uncheck all apply to every column, including ones the search box is hiding. The table is read-only.</p>
                 <div id="column-list" class="column-list"></div>
-              </div>
+              </section>
 
               <div id="results-region" class="results-region" aria-live="polite"></div>
 
@@ -294,7 +339,15 @@
                 <summary>Field notes from the crash event dictionary</summary>
                 <ul id="field-note-list"></ul>
               </details>
-            </section>
+            </div>
+
+            <div id="column-filter-pop" class="filter-pop" hidden>
+              <label for="filter-pop-input">Filter <span id="filter-pop-name"></span></label>
+              <input id="filter-pop-input" type="search" spellcheck="false" placeholder="Contains…" />
+              <div class="actions">
+                <button type="button" id="filter-pop-clear" class="secondary">Clear</button>
+              </div>
+            </div>
           </section>
 
           <section class="view" data-view="settings" id="view-settings" hidden>

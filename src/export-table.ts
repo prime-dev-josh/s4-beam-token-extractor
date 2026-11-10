@@ -8,12 +8,21 @@ export type ExportMeta = {
   subtitle: string;
 };
 
-export function snapshotTable(table: HTMLTableElement): TableSnapshot {
-  const headers = [...table.querySelectorAll("thead th")].map((cell) => cell.textContent?.trim() ?? "");
-  const rows = [...table.querySelectorAll("tbody tr")].map((row) =>
-    [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? ""),
-  );
-  return { headers, rows };
+export function snapshotRecords(
+  fields: { key: string; label: string }[],
+  rows: Record<string, unknown>[],
+): TableSnapshot {
+  return {
+    headers: fields.map((field) => field.label),
+    rows: rows.map((row) => fields.map((field) => formatCell(row[field.key]))),
+  };
+}
+
+export function formatCell(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "string") return value.length > 0 ? value : "—";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }
 
 export function csvFromSnapshot(snapshot: TableSnapshot): string {

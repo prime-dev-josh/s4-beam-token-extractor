@@ -15,8 +15,9 @@ import {
   csvFromSnapshot,
   downloadBlob,
   exportFilename,
+  formatCell,
   pdfFromSnapshot,
-  snapshotTable,
+  snapshotRecords,
 } from "./export-table.ts";
 
 const HIDDEN_COLUMNS_KEY = "beam-crash-hidden-columns";
@@ -29,9 +30,10 @@ const ERROR_CAUSES: Record<number, string> = {
   5: "Order of date range components in the date parameter is not chronological.",
 };
 
-type SearchMode = "idle" | "summary" | "table";
+type SearchMode = "idle" | "table";
 type Totals = { totalRecords: number; totalPages: number; pageSize: number };
 type ActiveQuery = { crashDate: string | null; s4UpdateDate: string | null };
+type SearchTab = "form" | "table";
 
 type CrashPayload = {
   summary?: {
@@ -82,12 +84,23 @@ export function initSearch(options: SearchOptions) {
   const errorCause = required<HTMLParagraphElement>("#error-cause");
   const errorSource = required<HTMLParagraphElement>("#error-source");
   const activeQuery = required<HTMLParagraphElement>("#active-query");
-  const pageInput = required<HTMLInputElement>("#page");
-  const pagePrev = required<HTMLButtonElement>("#page-prev");
-  const pageNext = required<HTMLButtonElement>("#page-next");
-  const pageGo = required<HTMLButtonElement>("#page-go");
+  const pageFromInput = required<HTMLInputElement>("#page-from");
+  const pageToInput = required<HTMLInputElement>("#page-to");
+  const pageRangeField = required<HTMLFieldSetElement>("#page-range-field");
+  const overviewStatus = required<HTMLParagraphElement>("#overview-status");
+  const overviewStats = required<HTMLElement>("#overview-stats");
+  const overviewRecords = required<HTMLElement>("#overview-records");
+  const overviewPages = required<HTMLElement>("#overview-pages");
+  const overviewSize = required<HTMLElement>("#overview-size");
+  const fetchScope = required<HTMLParagraphElement>("#fetch-scope");
   const pageMeta = required<HTMLParagraphElement>("#page-meta");
+  const tableMeta = required<HTMLParagraphElement>("#table-meta");
+  const viewPageInput = required<HTMLInputElement>("#view-page");
+  const viewSizeInput = required<HTMLSelectElement>("#view-size");
+  const viewPrev = required<HTMLButtonElement>("#view-prev");
+  const viewNext = required<HTMLButtonElement>("#view-next");
   const toggleColumns = required<HTMLButtonElement>("#toggle-columns");
+  const columnsClose = required<HTMLButtonElement>("#columns-close");
   const columnCount = required<HTMLSpanElement>("#column-count");
   const columnPanel = required<HTMLDivElement>("#column-panel");
   const columnSearch = required<HTMLInputElement>("#column-search");
@@ -99,17 +112,33 @@ export function initSearch(options: SearchOptions) {
   const resultsRegion = required<HTMLDivElement>("#results-region");
   const fieldNoteList = required<HTMLUListElement>("#field-note-list");
   const searchRecords = required<HTMLButtonElement>("#search-records");
-  const searchSummary = required<HTMLButtonElement>("#search-summary");
+  const tabForm = required<HTMLButtonElement>("#tab-form");
+  const tabTable = required<HTMLButtonElement>("#tab-table");
+  const panelForm = required<HTMLElement>("#panel-form");
+  const panelTable = required<HTMLElement>("#panel-table");
+  const searchHelp = required<HTMLButtonElement>("#search-help");
+  const searchHelpPanel = required<HTMLElement>("#search-help-panel");
+  const filterPop = required<HTMLDivElement>("#column-filter-pop");
+  const filterPopName = required<HTMLElement>("#filter-pop-name");
+  const filterPopInput = required<HTMLInputElement>("#filter-pop-input");
+  const filterPopClear = required<HTMLButtonElement>("#filter-pop-clear");
 
   const hidden = loadHiddenColumns();
+  const columnFilters = new Map<string, string>();
   let tokenReady = false;
   let busy = false;
   let mode: SearchMode = "idle";
   let active: ActiveQuery | null = null;
   let totals: Totals | null = null;
-  let summaryText = { totalRecords: "—", totalPages: "—", pageSize: "—" };
+  let overviewKey: string | null = null;
+  let rangeAutoKey: string | null = null;
   let items: Record<string, unknown>[] = [];
-  let loadedPage: number | null = null;
+  let fetchedFrom: number | null = null;
+  let fetchedTo: number | null = null;
+  let viewPage = 1;
+  let viewPageSize = 50;
+  let openFilterKey: string | null = null;
+  let summaryGen = 0;
 
   required<HTMLButtonElement>("#search-go-token").addEventListener("click", () => {
     go("token");
@@ -123,7 +152,9 @@ export function initSearch(options: SearchOptions) {
   });
 
   subscribe((session) => {
-    tokenReady = hasToken();
+    const ready = hasToken();
+    const readinessChanged = ready !== tokenReady;
+    tokenReady = ready;
     if (!session.token) {
       sessionNote.textContent =
         "No access token in this session. Request one on Get API Token, or paste one in Settings.";
@@ -137,6 +168,7 @@ export function initSearch(options: SearchOptions) {
       sessionNote.textContent = `Search will send the in-app token as a bearer token. ${formatRemaining(session.remainingMs)} remaining.`;
     }
     setSearchEnabled(tokenReady);
+    if (readinessChanged) scheduleOverview();
   });
 
   renderColumnList();
@@ -144,8 +176,9 @@ export function initSearch(options: SearchOptions) {
   syncModes();
   refreshChrome();
   renderResults();
+  showTab("form");
 
-  for (const input of [crashDay, crashStart, crashEnd, updateAt, updateStart, updateEnd, pageInput]) {
+  for (const input of [crashDay, crashStart, crashEnd, updateAt, updateStart, updateEnd, pageFromInput, pageToInput]) {
     input.addEventListener("input", () => {
       clearFieldState();
       refreshChrome();
@@ -153,198 +186,283 @@ export function initSearch(options: SearchOptions) {
   }
   for (const input of [crashDay, crashStart, crashEnd, updateAt, updateStart, updateEnd]) {
     input.addEventListener("change", () => {
-      const nextKey = currentFilterKey();
-      if (active && nextKey && nextKey !== filterKey(active)) {
-        pageInput.value = "1";
-      }
+      scheduleOverview();
       refreshChrome();
     });
   }
   crashMode.addEventListener("change", () => {
     syncModes();
+    scheduleOverview();
     refreshChrome();
   });
   updateMode.addEventListener("change", () => {
     syncModes();
+    scheduleOverview();
     refreshChrome();
   });
+  pageFromInput.addEventListener("change", refreshChrome);
+  pageToInput.addEventListener("change", refreshChrome);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    void executeForm("records");
+    void executeForm();
   });
-  searchSummary.addEventListener("click", () => {
-    void executeForm("summary");
+  tabForm.addEventListener("click", () => showTab("form"));
+  tabTable.addEventListener("click", () => showTab("table"));
+  searchHelp.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = searchHelpPanel.hidden;
+    searchHelpPanel.hidden = !open;
+    searchHelp.setAttribute("aria-expanded", String(open));
   });
-  pagePrev.addEventListener("click", () => {
-    const parsed = parsePage(pageInput.value);
-    const current = parsed.ok ? parsed.value : 1;
-    void loadAbsolutePage(Math.max(1, current - 1));
+  viewPrev.addEventListener("click", () => {
+    viewPage = Math.max(1, viewPage - 1);
+    renderResults();
   });
-  pageNext.addEventListener("click", () => {
-    const parsed = parsePage(pageInput.value);
-    const current = parsed.ok ? parsed.value : 1;
-    void loadAbsolutePage(current + 1);
+  viewNext.addEventListener("click", () => {
+    viewPage += 1;
+    renderResults();
   });
-  pageGo.addEventListener("click", () => {
-    const parsed = parsePage(pageInput.value);
-    if (!parsed.ok) {
-      showError(parsed.error, "local");
-      return;
-    }
-    void loadAbsolutePage(parsed.value);
+  viewPageInput.addEventListener("change", () => {
+    const parsed = parsePage(viewPageInput.value);
+    viewPage = parsed.ok ? parsed.value : 1;
+    renderResults();
+  });
+  viewSizeInput.addEventListener("change", () => {
+    const next = Number(viewSizeInput.value);
+    viewPageSize = Number.isFinite(next) && next > 0 ? next : 50;
+    viewPage = 1;
+    renderResults();
   });
   toggleColumns.addEventListener("click", () => {
-    const show = columnPanel.hidden;
-    columnPanel.hidden = !show;
-    toggleColumns.setAttribute("aria-expanded", String(show));
-    if (show) columnSearch.focus();
+    setColumnPanel(columnPanel.hasAttribute("hidden"));
   });
-  columnSearch.addEventListener("input", applyColumnFilter);
+  columnsClose.addEventListener("click", () => setColumnPanel(false));
+  columnSearch.addEventListener("input", applyColumnPickerFilter);
   columnsAll.addEventListener("click", () => setAllColumns(true));
   columnsNone.addEventListener("click", () => setAllColumns(false));
   exportCsv.addEventListener("click", () => {
-    void exportVisible("csv");
+    void exportFetched("csv");
   });
   exportPdf.addEventListener("click", () => {
-    void exportVisible("pdf");
+    void exportFetched("pdf");
   });
-  resultsRegion.addEventListener("click", (event) => {
+  filterPopInput.addEventListener("input", () => {
+    if (!openFilterKey) return;
+    const value = filterPopInput.value;
+    if (value.trim()) columnFilters.set(openFilterKey, value);
+    else columnFilters.delete(openFilterKey);
+    viewPage = 1;
+    renderResults();
+    positionFilterPop();
+  });
+  filterPopClear.addEventListener("click", () => {
+    if (!openFilterKey) return;
+    columnFilters.delete(openFilterKey);
+    filterPopInput.value = "";
+    viewPage = 1;
+    renderResults();
+    positionFilterPop();
+    filterPopInput.focus();
+  });
+  document.addEventListener("click", (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    if (target.dataset.action === "open-page-1") {
-      void loadAbsolutePage(1);
+    if (!(target instanceof Node)) return;
+    if (!searchHelpPanel.hidden && !searchHelpPanel.contains(target) && !searchHelp.contains(target)) {
+      searchHelpPanel.hidden = true;
+      searchHelp.setAttribute("aria-expanded", "false");
+    }
+    if (!filterPop.hidden && !filterPop.contains(target) && !(target instanceof Element && target.closest(".col-filter"))) {
+      closeFilterPop();
     }
   });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      searchHelpPanel.hidden = true;
+      searchHelp.setAttribute("aria-expanded", "false");
+      closeFilterPop();
+    }
+  });
+  window.addEventListener("resize", () => {
+    if (!filterPop.hidden) positionFilterPop();
+  });
+
+  function showTab(next: SearchTab) {
+    const formActive = next === "form";
+    tabForm.setAttribute("aria-selected", String(formActive));
+    tabTable.setAttribute("aria-selected", String(!formActive));
+    tabForm.classList.toggle("active", formActive);
+    tabTable.classList.toggle("active", !formActive);
+    panelForm.hidden = !formActive;
+    panelTable.hidden = formActive;
+    document.body.dataset.searchTab = next;
+    closeFilterPop();
+  }
+
+  function setColumnPanel(open: boolean) {
+    columnPanel.hidden = !open;
+    toggleColumns.setAttribute("aria-expanded", String(open));
+    if (open) columnSearch.focus();
+  }
 
   function setSearchEnabled(enabled: boolean) {
     searchRecords.disabled = !enabled || busy;
-    searchSummary.disabled = !enabled || busy;
-    if (!enabled || busy) {
-      pagePrev.disabled = true;
-      pageNext.disabled = true;
-      pageGo.disabled = true;
-      updateExport();
-      return;
-    }
-    updatePager();
     updateExport();
+    updateLocalPager();
   }
 
-  async function executeForm(kind: "records" | "summary") {
+  async function executeForm() {
     if (busy) return;
     stampDateLimits();
-    const snapshot = pageInput.value;
-    const prepared = prepareSearch(readDraft(), kind);
+    const prepared = prepareSearch(readDraft(), "records");
     if (!prepared.ok) {
       showError(prepared.error, "local");
+      showTab("form");
       return;
     }
     if (!ensureToken()) return;
-    if (kind === "records" && prepared.request.page != null) {
-      pageInput.value = String(prepared.request.page);
-    }
-    const ok = await run(prepared.request, kind);
-    if (!ok) pageInput.value = snapshot;
+    const ok = await runRange(prepared.request);
+    if (ok) showTab("table");
   }
 
-  async function loadAbsolutePage(page: number) {
-    const snapshot = pageInput.value;
-    pageInput.value = String(page);
-    const ok = await executePager();
-    if (!ok) pageInput.value = snapshot;
+  function scheduleOverview() {
+    const gen = ++summaryGen;
+    window.setTimeout(() => {
+      void loadOverview(gen);
+    }, 400);
   }
 
-  async function executePager(): Promise<boolean> {
-    if (busy) return false;
-    if (!ensureToken()) return false;
-    if (!active) {
-      showError(
-        {
-          message: "Search or get an overview before paging.",
-          details: "Previous, next, and go reuse the date filters from the last successful request.",
-        },
-        "local",
-      );
-      return false;
+  async function loadOverview(gen: number) {
+    if (gen !== summaryGen) return;
+    stampDateLimits();
+    const prepared = prepareSearch(readDraft(), "summary");
+    if (!prepared.ok) {
+      if (prepared.error.field !== "page") {
+        totals = null;
+        overviewKey = null;
+        renderOverview("idle");
+        refreshChrome();
+      }
+      return;
     }
-    const parsed = parsePage(pageInput.value);
-    if (!parsed.ok) {
-      showError(parsed.error, "local");
-      return false;
+    if (!tokenReady) {
+      renderOverview("need-token");
+      return;
     }
-    return run(
-      {
-        crashDate: active.crashDate,
-        s4UpdateDate: active.s4UpdateDate,
-        page: parsed.value,
-      },
-      "records",
-    );
+    const key = filterKey(prepared.request);
+    if (key === overviewKey && totals) {
+      renderOverview("ready");
+      refreshChrome();
+      return;
+    }
+    renderOverview("loading");
+    try {
+      const result = await invokeSearch({ ...prepared.request, pageFrom: null, pageTo: null });
+      if (gen !== summaryGen) return;
+      const failure = readFailure(result);
+      if (failure) {
+        totals = null;
+        overviewKey = null;
+        renderOverview("error", failure.message);
+        return;
+      }
+      const summary = result.payload.summary;
+      if (!summary) {
+        totals = null;
+        overviewKey = null;
+        renderOverview("error", "The crash event service did not return totals.");
+        return;
+      }
+      rememberSummary(summary);
+      overviewKey = key;
+      if (rangeAutoKey !== key && totals) {
+        pageFromInput.value = "1";
+        pageToInput.value = String(Math.max(1, totals.totalPages));
+        rangeAutoKey = key;
+      }
+      renderOverview("ready");
+      refreshChrome();
+    } catch (error) {
+      if (gen !== summaryGen) return;
+      totals = null;
+      overviewKey = null;
+      renderOverview("error", error instanceof Error ? error.message : String(error));
+    }
   }
 
-  async function run(request: SearchRequest, kind: "records" | "summary"): Promise<boolean> {
+  function renderOverview(state: "idle" | "need-token" | "loading" | "ready" | "error", message = "") {
+    overviewStats.hidden = state !== "ready";
+    if (state === "idle") {
+      overviewStatus.textContent = "Add a crash date, an update time, or both to load match totals.";
+      return;
+    }
+    if (state === "need-token") {
+      overviewStatus.textContent = "Get an API token to load match totals for this filter.";
+      return;
+    }
+    if (state === "loading") {
+      overviewStatus.textContent = "Loading match totals…";
+      return;
+    }
+    if (state === "error") {
+      overviewStatus.textContent = message || "Could not load match totals.";
+      return;
+    }
+    overviewStatus.textContent = "Match totals loaded. The To page field is set to the last Beam page.";
+    overviewRecords.textContent = totals ? totals.totalRecords.toLocaleString() : "—";
+    overviewPages.textContent = totals ? totals.totalPages.toLocaleString() : "—";
+    overviewSize.textContent = totals ? totals.pageSize.toLocaleString() : "—";
+  }
+
+  async function runRange(request: SearchRequest): Promise<boolean> {
+    const from = request.pageFrom ?? 1;
+    const to = request.pageTo ?? from;
     busy = true;
     setSearchEnabled(tokenReady);
     clearError();
     const slow = !request.crashDate && !!request.s4UpdateDate;
-    options.setStatus(
-      kind === "summary"
-        ? slow
-          ? "Loading the overview summary. A search that uses only the update time can take a while."
-          : "Loading the overview summary."
-        : slow
-          ? "Searching crash events. A search that uses only the update time can take a while."
-          : "Searching crash events.",
-    );
+    const collected: Record<string, unknown>[] = [];
     try {
-      const args: Record<string, unknown> = { accessToken: getToken() };
-      if (request.crashDate) args.crashDate = request.crashDate;
-      if (request.s4UpdateDate) args.s4UpdateDate = request.s4UpdateDate;
-      if (request.page != null) args.page = request.page;
-      const result = await invoke<CrashSearchResponse>("search_crash_events", args);
-      const failure = readFailure(result);
-      if (failure) {
-        showError(failure, result.httpStatus === 0 ? "local" : "api");
-        options.setStatus(failure.message);
-        return false;
-      }
-      const sameFilters = active != null && filterKey(active) === filterKey(request);
-      if (!sameFilters) totals = null;
-      active = { crashDate: request.crashDate, s4UpdateDate: request.s4UpdateDate };
-      if (kind === "summary" && result.payload.summary) {
-        rememberSummary(result.payload.summary);
-        mode = "summary";
-        loadedPage = null;
-        options.setStatus("Overview summary ready.", true);
-      } else if (Array.isArray(result.payload.items)) {
-        items = result.payload.items.filter(isRecord);
-        loadedPage = request.page;
-        mode = "table";
-        if (request.page != null) pageInput.value = String(request.page);
+      for (let page = from; page <= to; page += 1) {
         options.setStatus(
-          items.length === 0 ? "The crash event service returned no records on this page." : "Crash events loaded.",
-          true,
+          slow
+            ? `Fetching Beam page ${page} of ${to}. A search that uses only the update time can take a while.`
+            : `Fetching Beam page ${page} of ${to}.`,
         );
-      } else if (result.payload.summary) {
-        rememberSummary(result.payload.summary);
-        mode = "summary";
-        loadedPage = null;
-        options.setStatus("Overview summary ready.", true);
-      } else {
-        showError(
-          {
-            message: "The crash event service returned an unexpected response.",
-            details: "A page of records arrives as items. An overview arrives as summary.",
-          },
-          "api",
-        );
-        options.setStatus("Unexpected response from the crash event service.");
-        return false;
+        const result = await invokeSearch({ ...request, pageFrom: page, pageTo: page });
+        const failure = readFailure(result);
+        if (failure) {
+          showError(failure, result.httpStatus === 0 ? "local" : "api");
+          options.setStatus(failure.message);
+          return false;
+        }
+        if (!Array.isArray(result.payload.items)) {
+          showError(
+            {
+              message: "The crash event service returned an unexpected response.",
+              details: "A page of records arrives as items.",
+            },
+            "api",
+          );
+          options.setStatus("Unexpected response from the crash event service.");
+          return false;
+        }
+        collected.push(...result.payload.items.filter(isRecord));
       }
+      active = { crashDate: request.crashDate, s4UpdateDate: request.s4UpdateDate };
+      items = collected;
+      fetchedFrom = from;
+      fetchedTo = to;
+      mode = "table";
+      viewPage = 1;
       clearError();
       refreshChrome();
       renderResults();
-      resultsRegion.scrollIntoView({ block: "nearest" });
+      options.setStatus(
+        items.length === 0
+          ? "The crash event service returned no records for this page range."
+          : `Loaded ${items.length.toLocaleString()} crash events from Beam pages ${from}–${to}.`,
+        true,
+      );
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -363,13 +481,16 @@ export function initSearch(options: SearchOptions) {
     }
   }
 
+  async function invokeSearch(request: SearchRequest): Promise<CrashSearchResponse> {
+    const args: Record<string, unknown> = { accessToken: getToken() };
+    if (request.crashDate) args.crashDate = request.crashDate;
+    if (request.s4UpdateDate) args.s4UpdateDate = request.s4UpdateDate;
+    if (request.pageFrom != null) args.page = request.pageFrom;
+    return invoke<CrashSearchResponse>("search_crash_events", args);
+  }
+
   function rememberSummary(summary: NonNullable<CrashPayload["summary"]>) {
     totals = readTotals(summary);
-    summaryText = {
-      totalRecords: displayCount(summary.total_records),
-      totalPages: displayCount(summary.total_pages),
-      pageSize: displayCount(summary.page_size),
-    };
   }
 
   function ensureToken(): boolean {
@@ -381,6 +502,7 @@ export function initSearch(options: SearchOptions) {
       },
       "local",
     );
+    showTab("form");
     return false;
   }
 
@@ -394,7 +516,8 @@ export function initSearch(options: SearchOptions) {
       updateAt: updateAt.value,
       updateStart: updateStart.value,
       updateEnd: updateEnd.value,
-      page: pageInput.value,
+      pageFrom: pageFromInput.value,
+      pageTo: pageToInput.value,
     };
   }
 
@@ -417,69 +540,85 @@ export function initSearch(options: SearchOptions) {
     syncModes();
     const prepared = prepareSearch(readDraft(), "records");
     preview.textContent = prepared.ok
-      ? `Search records sends ${formatSearchPath(prepared.request)}. Get Overview Summary sends the same dates with page left off.`
-      : "Add a crash date, an update time, or both. At least one is required. Page is sent only by Search records, previous, next, and go.";
+      ? `Search records fetches ${formatSearchPath(prepared.request)}. Totals load automatically with page left off.`
+      : "Add a crash date, an update time, or both. At least one is required. Search fetches every Beam page in the from–to range.";
     if (active) {
-      const path = formatSearchPath({ ...active, page: null });
+      const path = formatSearchPath({ ...active, pageFrom: fetchedFrom, pageTo: fetchedTo });
       const draftKey = currentFilterKey();
       const drifted = draftKey != null && draftKey !== filterKey(active);
       activeQuery.textContent = drifted
-        ? `Paging still uses ${path}. The form has unsent date changes. Submit Search records or Get Overview Summary to apply them.`
-        : `Paging reuses ${path}.`;
+        ? `The table still holds ${path}. The form has unsent date changes.`
+        : `The table holds ${path}.`;
     } else {
-      activeQuery.textContent = "Paging stays off until a search or an overview summary succeeds.";
+      activeQuery.textContent = "No records have been fetched yet.";
     }
+    updateFetchScope(prepared.ok ? prepared.request : null);
     updateColumnCount();
-    updatePager();
+    updateLocalPager();
     updateExport();
   }
 
-  function updatePager() {
-    const parsed = parsePage(pageInput.value);
-    const page = parsed.ok ? parsed.value : null;
-    const canPage = tokenReady && !busy && active != null;
-    pageGo.disabled = !canPage;
-    pagePrev.disabled = !canPage || page == null || page <= 1;
-    const atEnd =
-      page != null &&
-      ((totals != null && page >= totals.totalPages) ||
-        (mode === "table" && loadedPage === page && items.length < (totals?.pageSize ?? 500)));
-    pageNext.disabled = !canPage || page == null || atEnd;
-    if (mode === "summary" && totals) {
-      pageMeta.textContent = `Overview is showing instead of a page. ${totals.totalRecords.toLocaleString()} records, ${totals.totalPages.toLocaleString()} pages, ${totals.pageSize.toLocaleString()} per page. Go loads the page number into the table.`;
-    } else if (mode === "table" && loadedPage != null) {
-      const of = totals ? ` of ${totals.totalPages.toLocaleString()}` : "";
-      pageMeta.textContent = `Showing page ${loadedPage.toLocaleString()}${of}. Each page holds ${totals ? totals.pageSize.toLocaleString() : "500"} records. A page past the end returns an empty list.`;
-    } else if (totals) {
-      pageMeta.textContent = `${totals.totalRecords.toLocaleString()} records across ${totals.totalPages.toLocaleString()} pages.`;
-    } else {
-      pageMeta.textContent = "Page 1 is the first block of records. The overview summary does not use this number.";
+  function updateFetchScope(request: SearchRequest | null) {
+    fetchScope.hidden = true;
+    fetchScope.className = "warn";
+    if (!request || request.pageFrom == null || request.pageTo == null) return;
+    const pages = request.pageTo - request.pageFrom + 1;
+    const cap = pages * (totals?.pageSize ?? 500);
+    const coversAll =
+      totals != null &&
+      totals.totalPages > 0 &&
+      request.pageFrom === 1 &&
+      request.pageTo >= totals.totalPages;
+    if (coversAll && totals) {
+      fetchScope.hidden = false;
+      fetchScope.className = "warn fetch-all";
+      fetchScope.textContent = `This search will fetch all ${totals.totalPages.toLocaleString()} Beam pages, up to ${totals.totalRecords.toLocaleString()} records.`;
+      return;
     }
+    fetchScope.hidden = false;
+    fetchScope.textContent = `This search will fetch Beam pages ${request.pageFrom}–${request.pageTo} (${pages.toLocaleString()} pages, up to ${cap.toLocaleString()} records).`;
+  }
+
+  function visibleFields() {
+    return CRASH_FIELDS.filter((field) => !hidden.has(field.key));
+  }
+
+  function filteredItems(): Record<string, unknown>[] {
+    const fields = visibleFields();
+    return items.filter((item) =>
+      fields.every((field) => {
+        const query = columnFilters.get(field.key)?.trim().toLowerCase();
+        if (!query) return true;
+        return formatCell(item[field.key]).toLowerCase().includes(query);
+      }),
+    );
   }
 
   function renderResults() {
+    const filtered = filteredItems();
+    const fields = visibleFields();
+    const pages = Math.max(1, Math.ceil(filtered.length / viewPageSize) || 1);
+    if (viewPage > pages) viewPage = pages;
+    if (viewPage < 1) viewPage = 1;
+    viewPageInput.value = String(viewPage);
+    const start = (viewPage - 1) * viewPageSize;
+    const pageRows = filtered.slice(start, start + viewPageSize);
     resultsRegion.replaceChildren();
     try {
-      if (mode === "summary") {
-        resultsRegion.append(renderSummary());
-        return;
-      }
       if (mode !== "table") {
         const empty = document.createElement("p");
         empty.className = "results-empty";
-        empty.textContent = "Run Search records for a page of crash events, or Get Overview Summary for the match totals.";
+        empty.textContent = "Run Search records to load crash events into this table.";
         resultsRegion.append(empty);
+        tableMeta.textContent = "No fetched records yet.";
         return;
       }
-      const fields = CRASH_FIELDS.filter((field) => !hidden.has(field.key));
       if (items.length === 0) {
         const empty = document.createElement("p");
         empty.className = "results-empty";
-        empty.textContent =
-          loadedPage != null && loadedPage > 1
-            ? "No records on this page. Beam returns an empty list when the page is past the last page, instead of an error."
-            : "No crash events matched these filters.";
+        empty.textContent = "No crash events matched these filters.";
         resultsRegion.append(empty);
+        tableMeta.textContent = "0 fetched records.";
         return;
       }
       if (fields.length === 0) {
@@ -487,45 +626,76 @@ export function initSearch(options: SearchOptions) {
         empty.className = "results-empty";
         empty.textContent = "Every column is hidden. Check at least one column to see this page.";
         resultsRegion.append(empty);
+        tableMeta.textContent = `${items.length.toLocaleString()} fetched records.`;
         return;
       }
-      const hint = document.createElement("p");
-      hint.className = "scroll-hint";
-      hint.textContent = `${items.length.toLocaleString()} read-only records on this page. Scroll horizontally to move across the columns. Full CSV and PDF export the columns currently shown.`;
-      const scroller = document.createElement("div");
-      scroller.className = "table-scroll";
-      scroller.tabIndex = 0;
-      scroller.setAttribute("aria-label", "Crash event results");
-      scroller.append(renderTable(fields, items));
-      resultsRegion.append(hint, scroller);
+      if (filtered.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "results-empty";
+        empty.textContent = "No rows match the column filters. Clear a filter from a column header to bring rows back.";
+        resultsRegion.append(empty);
+      } else {
+        const scroller = document.createElement("div");
+        scroller.className = "table-scroll";
+        scroller.tabIndex = 0;
+        scroller.setAttribute("aria-label", "Crash event results");
+        scroller.append(renderTable(fields, pageRows, columnFilters, (key, button) => {
+          openFilter(key, button);
+        }));
+        resultsRegion.append(scroller);
+      }
+      const end = Math.min(filtered.length, start + pageRows.length);
+      const filterNote = filtered.length === items.length
+        ? ""
+        : ` Filtered to ${filtered.length.toLocaleString()}.`;
+      tableMeta.textContent = `${items.length.toLocaleString()} fetched records.${filterNote} Showing ${
+        pageRows.length === 0 ? 0 : start + 1
+      }–${end} on local page ${viewPage} of ${pages}.`;
     } finally {
+      updateLocalPager();
       updateExport();
     }
   }
 
+  function updateLocalPager() {
+    const filtered = mode === "table" ? filteredItems() : [];
+    const pages = Math.max(1, Math.ceil(filtered.length / viewPageSize) || 1);
+    const canPage = mode === "table" && filtered.length > 0 && !busy;
+    viewPrev.disabled = !canPage || viewPage <= 1;
+    viewNext.disabled = !canPage || viewPage >= pages;
+    viewPageInput.disabled = !canPage;
+    viewSizeInput.disabled = mode !== "table" || busy;
+    pageMeta.textContent =
+      mode === "table"
+        ? "Local paging and column filters only change what you see. CSV and PDF export every fetched record in the columns currently shown."
+        : "Search from the Search tab to fetch records. This pager stays local after that.";
+  }
+
   function updateExport() {
-    const ready = resultsRegion.querySelector(".results-table") != null && !busy;
+    const ready = mode === "table" && items.length > 0 && visibleFields().length > 0 && !busy;
     exportCsv.disabled = !ready;
     exportPdf.disabled = !ready;
   }
 
-  async function exportVisible(kind: "csv" | "pdf") {
-    const table = resultsRegion.querySelector<HTMLTableElement>(".results-table");
-    if (!table) {
-      options.setStatus("Load a page of crash events before exporting.");
+  async function exportFetched(kind: "csv" | "pdf") {
+    const fields = visibleFields();
+    if (items.length === 0) {
+      options.setStatus("Load crash events before exporting.");
       return;
     }
-    const snapshot = snapshotTable(table);
-    if (snapshot.headers.length === 0) {
+    if (fields.length === 0) {
       options.setStatus("Check at least one column before exporting.");
       return;
     }
-    const filename = exportFilename(kind, loadedPage);
-    const query = active ? formatSearchPath({ ...active, page: loadedPage }) : "";
+    const snapshot = snapshotRecords(fields, items);
+    const filename = exportFilename(kind, fetchedFrom);
+    const query = active
+      ? formatSearchPath({ ...active, pageFrom: fetchedFrom, pageTo: fetchedTo })
+      : "";
     const subtitle = [
       query,
       `${snapshot.headers.length} columns shown`,
-      `${snapshot.rows.length.toLocaleString()} records`,
+      `${snapshot.rows.length.toLocaleString()} fetched records`,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -538,7 +708,7 @@ export function initSearch(options: SearchOptions) {
           new Blob([csvFromSnapshot(snapshot)], { type: "text/csv;charset=utf-8" }),
         );
         options.setStatus(
-          `CSV saved with ${snapshot.headers.length} columns and ${snapshot.rows.length.toLocaleString()} rows.`,
+          `CSV saved with ${snapshot.headers.length} columns and ${snapshot.rows.length.toLocaleString()} fetched rows.`,
           true,
         );
         return;
@@ -550,7 +720,7 @@ export function initSearch(options: SearchOptions) {
       });
       downloadBlob(filename, blob);
       options.setStatus(
-        `PDF saved with ${snapshot.headers.length} columns and ${snapshot.rows.length.toLocaleString()} rows.`,
+        `PDF saved with ${snapshot.headers.length} columns and ${snapshot.rows.length.toLocaleString()} fetched rows.`,
         true,
       );
     } catch (error) {
@@ -558,46 +728,6 @@ export function initSearch(options: SearchOptions) {
     } finally {
       updateExport();
     }
-  }
-
-  function renderSummary(): HTMLElement {
-    const wrap = document.createElement("div");
-    wrap.className = "summary-view";
-    const title = document.createElement("h3");
-    title.textContent = "Overview summary";
-    const copy = document.createElement("p");
-    copy.textContent =
-      "Page was left off, so Beam returned totals instead of crash records. This replaces the table until you load a page.";
-    const list = document.createElement("dl");
-    for (const [label, value] of [
-      ["Total records", summaryText.totalRecords],
-      ["Total pages", summaryText.totalPages],
-      ["Page size", summaryText.pageSize],
-    ] as const) {
-      const row = document.createElement("div");
-      const term = document.createElement("dt");
-      term.textContent = label;
-      const detail = document.createElement("dd");
-      detail.textContent = value;
-      row.append(term, detail);
-      list.append(row);
-    }
-    const follow = document.createElement("p");
-    follow.className = "hint";
-    follow.textContent = totals && totals.totalRecords === 0
-      ? "Nothing matched these filters."
-      : "Open page 1 to load the first block of records into the table. Each page is read-only.";
-    wrap.append(title, copy, list);
-    if (!totals || totals.totalPages > 0) {
-      const openPage = document.createElement("button");
-      openPage.type = "button";
-      openPage.className = "primary";
-      openPage.dataset.action = "open-page-1";
-      openPage.textContent = "Open page 1";
-      wrap.append(openPage);
-    }
-    wrap.append(follow);
-    return wrap;
   }
 
   function renderColumnList() {
@@ -624,6 +754,7 @@ export function initSearch(options: SearchOptions) {
         persistHiddenColumns(hidden);
         updateColumnCount();
         if (mode === "table") renderResults();
+        else updateExport();
       });
       const text = document.createElement("span");
       text.textContent = field.label;
@@ -640,7 +771,7 @@ export function initSearch(options: SearchOptions) {
     return section;
   }
 
-  function applyColumnFilter() {
+  function applyColumnPickerFilter() {
     const query = columnSearch.value.trim().toLowerCase();
     for (const section of columnList.querySelectorAll("section")) {
       let visible = 0;
@@ -665,6 +796,7 @@ export function initSearch(options: SearchOptions) {
     persistHiddenColumns(hidden);
     updateColumnCount();
     if (mode === "table") renderResults();
+    else updateExport();
   }
 
   function updateColumnCount() {
@@ -683,10 +815,40 @@ export function initSearch(options: SearchOptions) {
     }
   }
 
+  function openFilter(key: string, button: HTMLElement) {
+    openFilterKey = key;
+    const field = CRASH_FIELDS.find((item) => item.key === key);
+    filterPopName.textContent = field?.label ?? key;
+    filterPopInput.value = columnFilters.get(key) ?? "";
+    filterPop.hidden = false;
+    filterPop.dataset.anchor = key;
+    positionFilterPop(button);
+    filterPopInput.focus();
+    filterPopInput.select();
+  }
+
+  function positionFilterPop(button?: HTMLElement) {
+    const anchor =
+      button ??
+      resultsRegion.querySelector<HTMLElement>(`.col-filter[data-key="${openFilterKey ?? ""}"]`);
+    if (!anchor) return;
+    const box = anchor.getBoundingClientRect();
+    const pop = filterPop.getBoundingClientRect();
+    const left = Math.min(Math.max(8, box.right - pop.width), window.innerWidth - pop.width - 8);
+    const top = Math.min(box.bottom + 6, window.innerHeight - pop.height - 8);
+    filterPop.style.left = `${Math.max(8, left)}px`;
+    filterPop.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function closeFilterPop() {
+    openFilterKey = null;
+    filterPop.hidden = true;
+  }
+
   function showError(error: QueryError, source: "local" | "api") {
     crashField.classList.toggle("invalid", error.field === "crash_date");
     updateField.classList.toggle("invalid", error.field === "s4_update_date");
-    pageInput.classList.toggle("invalid", error.field === "page");
+    pageRangeField.classList.toggle("invalid", error.field === "page");
     errorCode.textContent = error.code == null ? "" : `Code ${error.code}`;
     errorMessage.textContent = error.message;
     errorDetails.textContent = error.details ?? "";
@@ -695,6 +857,7 @@ export function initSearch(options: SearchOptions) {
       ? "Checked before the request was sent."
       : "Returned by the crash event service.";
     errorBox.hidden = false;
+    showTab("form");
     errorBox.scrollIntoView({ block: "nearest" });
   }
 
@@ -706,7 +869,7 @@ export function initSearch(options: SearchOptions) {
   function clearFieldState() {
     crashField.classList.remove("invalid");
     updateField.classList.remove("invalid");
-    pageInput.classList.remove("invalid");
+    pageRangeField.classList.remove("invalid");
   }
 
   function stampDateLimits() {
@@ -721,7 +884,12 @@ export function initSearch(options: SearchOptions) {
   }
 }
 
-function renderTable(fields: typeof CRASH_FIELDS, items: Record<string, unknown>[]): HTMLTableElement {
+function renderTable(
+  fields: typeof CRASH_FIELDS,
+  rows: Record<string, unknown>[],
+  filters: Map<string, string>,
+  onFilter: (key: string, button: HTMLElement) => void,
+): HTMLTableElement {
   const table = document.createElement("table");
   table.className = "results-table";
   const caption = document.createElement("caption");
@@ -732,31 +900,40 @@ function renderTable(fields: typeof CRASH_FIELDS, items: Record<string, unknown>
   for (const field of fields) {
     const cell = document.createElement("th");
     cell.scope = "col";
-    cell.textContent = field.label;
+    const wrap = document.createElement("div");
+    wrap.className = "th-wrap";
+    const label = document.createElement("span");
+    label.textContent = field.label;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "col-filter";
+    button.dataset.key = field.key;
+    button.setAttribute("aria-label", `Filter ${field.label}`);
+    button.textContent = "Filter";
+    if (filters.get(field.key)?.trim()) button.classList.add("active");
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onFilter(field.key, button);
+    });
+    wrap.append(label, button);
+    cell.append(wrap);
     const title = [`${field.label} (${field.key})`, field.format, field.note].filter(Boolean).join(". ");
     cell.title = title;
     headRow.append(cell);
   }
   thead.append(headRow);
   const tbody = document.createElement("tbody");
-  for (const item of items) {
+  for (const item of rows) {
     const row = document.createElement("tr");
     for (const field of fields) {
       const cell = document.createElement("td");
-      cell.textContent = cellText(item[field.key]);
+      cell.textContent = formatCell(item[field.key]);
       row.append(cell);
     }
     tbody.append(row);
   }
   table.append(caption, thead, tbody);
   return table;
-}
-
-function cellText(value: unknown): string {
-  if (value == null) return "—";
-  if (typeof value === "string") return value.length > 0 ? value : "—";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
 }
 
 function readFailure(result: CrashSearchResponse): QueryError | null {
@@ -791,12 +968,6 @@ function readTotals(summary: NonNullable<CrashPayload["summary"]>): Totals | nul
     totalPages: summary.total_pages,
     pageSize: summary.page_size,
   };
-}
-
-function displayCount(value: unknown): string {
-  if (typeof value === "number" && Number.isFinite(value)) return value.toLocaleString();
-  if (typeof value === "string" && value.trim()) return value;
-  return "—";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

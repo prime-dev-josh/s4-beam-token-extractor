@@ -9,13 +9,15 @@ export type SearchDraft = {
   updateAt: string;
   updateStart: string;
   updateEnd: string;
-  page: string;
+  pageFrom: string;
+  pageTo: string;
 };
 
 export type SearchRequest = {
   crashDate: string | null;
   s4UpdateDate: string | null;
-  page: number | null;
+  pageFrom: number | null;
+  pageTo: number | null;
 };
 
 export type QueryError = {
@@ -53,11 +55,13 @@ export function prepareSearch(
     };
   }
 
-  let page: number | null = null;
+  let pageFrom: number | null = null;
+  let pageTo: number | null = null;
   if (kind === "records") {
-    const parsed = parsePage(draft.page);
+    const parsed = parsePageRange(draft.pageFrom, draft.pageTo);
     if (!parsed.ok) return parsed;
-    page = parsed.value;
+    pageFrom = parsed.from;
+    pageTo = parsed.to;
   }
 
   return {
@@ -65,7 +69,8 @@ export function prepareSearch(
     request: {
       crashDate: crash.value,
       s4UpdateDate: update.value,
-      page,
+      pageFrom,
+      pageTo,
     },
   };
 }
@@ -99,11 +104,38 @@ export function parsePage(
   return { ok: true, value };
 }
 
+export function parsePageRange(
+  fromRaw: string,
+  toRaw: string,
+): { ok: true; from: number; to: number } | { ok: false; error: QueryError } {
+  const from = parsePage(fromRaw === "" ? "1" : fromRaw);
+  if (!from.ok) return from;
+  const to = parsePage(toRaw === "" ? String(from.value) : toRaw);
+  if (!to.ok) return to;
+  if (to.value < from.value) {
+    return {
+      ok: false,
+      error: {
+        field: "page",
+        message: "Page range end must be at or after the start.",
+        details: "Each Beam page holds 500 records. The range is inclusive, and Search fetches every page in it.",
+      },
+    };
+  }
+  return { ok: true, from: from.value, to: to.value };
+}
+
 export function formatSearchPath(request: SearchRequest): string {
   const parts: string[] = [];
   if (request.crashDate) parts.push(`crash_date=${request.crashDate}`);
   if (request.s4UpdateDate) parts.push(`s4_update_date=${request.s4UpdateDate}`);
-  if (request.page != null) parts.push(`page=${request.page}`);
+  if (request.pageFrom != null && request.pageTo != null) {
+    parts.push(
+      request.pageFrom === request.pageTo
+        ? `page=${request.pageFrom}`
+        : `page=${request.pageFrom}..${request.pageTo}`,
+    );
+  }
   return parts.length
     ? `/crash-event/v1/search?${parts.join("&")}`
     : "/crash-event/v1/search";
