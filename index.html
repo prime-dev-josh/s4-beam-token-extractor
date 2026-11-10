@@ -1,96 +1,361 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Beam Token</title>
+    <script>
+      document.documentElement.dataset.theme =
+        localStorage.getItem("beam-theme") === "dark" ? "dark" : "light";
+    </script>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <main>
-      <header>
-        <p class="eyebrow">Signal4 Beam</p>
-        <h1>API token</h1>
-        <p class="lede">
-          Open the encrypted credentials file Signal4 sent you, unlock it with
-          your passphrase, then copy a short-lived access token.
-        </p>
-      </header>
+    <div class="app">
+      <aside class="nav" aria-label="Main">
+        <a href="#/" class="brand" data-nav="home">
+          <img class="brand-mark light" src="/brand/prime-ae-light.png" alt="PRIME AE" />
+          <img class="brand-mark dark" src="/brand/prime-ae-dark.png" alt="PRIME AE" />
+          <span>
+            <strong>Beam</strong>
+            <small>Signal4</small>
+          </span>
+        </a>
+        <nav>
+          <a href="#/" data-nav="home"><span>01</span> Home</a>
+          <a href="#/token" data-nav="token"><span>02</span> Get API Token</a>
+          <a href="#/search" data-nav="search"><span>03</span> Search Signal4 Beam</a>
+          <a href="#/settings" data-nav="settings"><span>04</span> Settings</a>
+        </nav>
+        <p id="nav-session" class="nav-session">No token in session</p>
+      </aside>
 
-      <section class="card" id="file-card">
-        <div class="card-head">
-          <span class="num">1</span>
-          <h2>Encrypted file</h2>
-        </div>
-        <p class="hint">
-          Drop the <code>.asc</code> file here, or choose it from disk. This is
-          the file Signal4 encrypted for you, not your public key.
-        </p>
-        <div id="dropzone" class="dropzone" tabindex="0">
-          <button type="button" id="choose-file" class="secondary">Choose file</button>
-          <p id="file-name">No file selected</p>
-        </div>
-      </section>
+      <div class="workspace">
+        <header class="topbar">
+          <h1 id="page-title">Home</h1>
+          <p id="status" role="status"></p>
+        </header>
 
-      <section class="card" id="pass-card">
-        <div class="card-head">
-          <span class="num">2</span>
-          <h2>Unlock</h2>
-        </div>
-        <label for="passphrase">Private key passphrase</label>
-        <div class="pass-row">
-          <input
-            id="passphrase"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="Passphrase you created with the key"
-          />
-          <button type="button" id="toggle-pass" class="secondary" aria-pressed="false">
-            Show
-          </button>
-        </div>
-        <button type="button" id="decrypt" class="primary">Decrypt credentials</button>
-      </section>
+        <main>
+          <section class="view title-screen" data-view="home" id="view-home">
+            <div class="title-stack">
+              <p class="eyebrow">PRIME AE · Signal4</p>
+              <h2>BEAM</h2>
+              <p class="lede">
+                Crash data, from credentials to search. Tokens stay in memory for this session.
+              </p>
+            </div>
+            <nav class="title-menu" aria-label="Start">
+              <a href="#/token">
+                <span class="menu-index">01</span>
+                <span class="menu-copy">
+                  <strong>Get API Token</strong>
+                  <small>Decrypt credentials and request a bearer token</small>
+                </span>
+                <span class="menu-cue">Enter</span>
+              </a>
+              <a href="#/search">
+                <span class="menu-index">02</span>
+                <span class="menu-copy">
+                  <strong>Search Signal4 Beam</strong>
+                  <small>Query crash events, page results, and pull the overview</small>
+                </span>
+                <span class="menu-cue">Enter</span>
+              </a>
+              <a href="#/settings">
+                <span class="menu-index">03</span>
+                <span class="menu-copy">
+                  <strong>Settings</strong>
+                  <small>Review the session token and switch light or dark</small>
+                </span>
+                <span class="menu-cue">Enter</span>
+              </a>
+            </nav>
+          </section>
 
-      <section class="card" id="ready-card" hidden>
-        <div class="card-head">
-          <span class="num">3</span>
-          <h2>Get a token</h2>
-        </div>
-        <p id="ready-copy"></p>
-        <dl>
-          <div>
-            <dt>File</dt>
-            <dd id="sum-file"></dd>
-          </div>
-          <div>
-            <dt>Client id</dt>
-            <dd id="sum-id"></dd>
-          </div>
-          <div>
-            <dt>Credentials expire</dt>
-            <dd id="sum-exp"></dd>
-          </div>
-        </dl>
-        <button type="button" id="get-token" class="primary">Get API token</button>
-      </section>
+          <section class="view" data-view="token" id="view-token" hidden>
+            <p class="lede">
+              Open the encrypted credentials file Signal4 sent you, unlock it with
+              your passphrase, then request a short-lived access token.
+            </p>
+            <div class="setup-grid">
+              <section class="card" id="file-card">
+                <div class="card-head">
+                  <span class="num">1</span>
+                  <h2>Encrypted file</h2>
+                </div>
+                <p class="hint">
+                  Drop the <code>.asc</code> file here, or choose it from disk. This is
+                  the file Signal4 encrypted for you, not your public key.
+                </p>
+                <div id="dropzone" class="dropzone" tabindex="0">
+                  <button type="button" id="choose-file" class="secondary">Choose file</button>
+                  <p id="file-name">No file selected</p>
+                </div>
+              </section>
 
-      <section class="card" id="token-card" hidden>
-        <div class="card-head">
-          <span class="num">4</span>
-          <h2>Access token</h2>
-        </div>
-        <p id="token-meta"></p>
-        <textarea id="token" readonly rows="3" spellcheck="false"></textarea>
-        <div class="actions">
-          <button type="button" id="copy" class="primary">Copy token</button>
-          <button type="button" id="refresh" class="secondary">Get a new token</button>
-        </div>
-      </section>
+              <section class="card" id="pass-card">
+                <div class="card-head">
+                  <span class="num">2</span>
+                  <h2>Unlock</h2>
+                </div>
+                <label for="passphrase">Private key passphrase</label>
+                <div class="pass-row">
+                  <input
+                    id="passphrase"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Passphrase you created with the key"
+                  />
+                  <button type="button" id="toggle-pass" class="secondary" aria-pressed="false">
+                    Show
+                  </button>
+                </div>
+                <button type="button" id="decrypt" class="primary">Decrypt credentials</button>
+              </section>
 
-      <p id="status" role="status"></p>
-    </main>
+              <section class="card" id="ready-card" hidden>
+                <div class="card-head">
+                  <span class="num">3</span>
+                  <h2>Get a token</h2>
+                </div>
+                <p id="ready-copy"></p>
+                <dl>
+                  <div>
+                    <dt>File</dt>
+                    <dd id="sum-file"></dd>
+                  </div>
+                  <div>
+                    <dt>Client id</dt>
+                    <dd id="sum-id"></dd>
+                  </div>
+                  <div>
+                    <dt>Credentials expire</dt>
+                    <dd id="sum-exp"></dd>
+                  </div>
+                </dl>
+                <button type="button" id="get-token" class="primary">Get API token</button>
+              </section>
+
+              <section class="card" id="token-card" hidden>
+                <div class="card-head">
+                  <span class="num">4</span>
+                  <h2>Access token</h2>
+                </div>
+                <p id="token-meta"></p>
+                <textarea id="token" readonly rows="3" spellcheck="false"></textarea>
+                <div class="actions">
+                  <button type="button" id="copy" class="primary">Copy token</button>
+                  <button type="button" id="refresh" class="secondary">Get a new token</button>
+                  <button type="button" id="go-search" class="secondary">Search Signal4 Beam</button>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" data-view="search" id="view-search" hidden>
+            <section class="card search-card" id="search-card">
+              <div class="card-head">
+                <h2>Crash event search</h2>
+              </div>
+              <p class="hint">
+                Read-only search of <code>/crash-event/v1/search</code>. At least one
+                date filter is required. Results stay in this window and are not written to disk.
+              </p>
+              <div class="session-row">
+                <p id="session-note"></p>
+                <div class="actions">
+                  <button type="button" id="search-go-token" class="secondary">Get API Token</button>
+                  <button type="button" id="search-go-settings" class="secondary">Settings</button>
+                </div>
+              </div>
+
+              <div class="use-cases">
+                <h3>Ways to search</h3>
+                <ul>
+                  <li><strong>One day of crashes.</strong> Crash date, single day, such as <code>2026-01-01</code>.</li>
+                  <li><strong>A span of crash dates.</strong> Crash date range, sent as <code>2025-12-01~2025-12-31</code>.</li>
+                  <li><strong>Records touched at one moment.</strong> Update time, single timestamp, such as <code>2026-08-01T00:00:00</code>.</li>
+                  <li><strong>Records touched during a window.</strong> Update time range, such as <code>2026-07-15T00:00:00~2026-07-15T23:59:59</code>.</li>
+                  <li><strong>Crashes in one period that changed in another.</strong> Set both filters. Example: crashes in January 2026 and updates in March 2026.</li>
+                  <li><strong>How many records match.</strong> Get Overview Summary. Page is left off, and the table is replaced by totals.</li>
+                  <li><strong>A page of records.</strong> Search records with page 1 or higher. Each page holds 500 records. A page past the end returns an empty list.</li>
+                </ul>
+              </div>
+
+              <form id="crash-search-form" class="search-form" novalidate>
+                <fieldset id="crash-field">
+                  <legend>Crash date</legend>
+                  <p class="hint">When the crash occurred. <code>YYYY-MM-DD</code>, through today. A range joins the days with <code>~</code>.</p>
+                  <label for="crash-mode">How to match</label>
+                  <select id="crash-mode">
+                    <option value="off">Not used</option>
+                    <option value="single" selected>Single day</option>
+                    <option value="range">Date range</option>
+                  </select>
+                  <div id="crash-single">
+                    <label for="crash-day">Day</label>
+                    <input id="crash-day" type="date" />
+                  </div>
+                  <div id="crash-range" hidden>
+                    <div class="range-grid">
+                      <div>
+                        <label for="crash-start">Start</label>
+                        <input id="crash-start" type="date" />
+                      </div>
+                      <div>
+                        <label for="crash-end">End</label>
+                        <input id="crash-end" type="date" />
+                      </div>
+                    </div>
+                  </div>
+                </fieldset>
+
+                <fieldset id="update-field">
+                  <legend>Update time</legend>
+                  <p class="hint">When Signal4 last updated the record. <code>YYYY-MM-DDTHH:mm:ss</code>, through now. A range joins the timestamps with <code>~</code>.</p>
+                  <label for="update-mode">How to match</label>
+                  <select id="update-mode">
+                    <option value="off" selected>Not used</option>
+                    <option value="single">Single timestamp</option>
+                    <option value="range">Time range</option>
+                  </select>
+                  <div id="update-single" hidden>
+                    <label for="update-at">Timestamp</label>
+                    <input id="update-at" type="datetime-local" step="1" />
+                  </div>
+                  <div id="update-range" hidden>
+                    <div class="range-grid">
+                      <div>
+                        <label for="update-start">Start</label>
+                        <input id="update-start" type="datetime-local" step="1" />
+                      </div>
+                      <div>
+                        <label for="update-end">End</label>
+                        <input id="update-end" type="datetime-local" step="1" />
+                      </div>
+                    </div>
+                  </div>
+                </fieldset>
+
+                <p id="slow-note" class="warn span-2" hidden>
+                  This search uses only the update time, so Beam scans the full table and the response can be slow. Narrow the window, or add a crash date range.
+                </p>
+
+                <div class="actions span-2">
+                  <button type="submit" id="search-records" class="primary">Search records</button>
+                  <button type="button" id="search-summary" class="secondary">Get Overview Summary</button>
+                </div>
+                <p id="query-preview" class="query-preview span-2"></p>
+
+                <div id="search-error" class="error-box span-2" role="alert" hidden>
+                  <p id="error-code" class="error-code"></p>
+                  <p id="error-message" class="error-message"></p>
+                  <p id="error-details" class="error-details"></p>
+                  <p id="error-cause" class="error-cause"></p>
+                  <p id="error-source" class="error-source"></p>
+                </div>
+
+                <div class="results-toolbar span-2">
+                  <p id="active-query"></p>
+                  <div class="pager">
+                    <button type="button" id="page-prev" class="secondary">Previous</button>
+                    <label for="page">Page
+                      <input id="page" type="number" min="1" step="1" value="1" inputmode="numeric" />
+                    </label>
+                    <button type="button" id="page-go" class="secondary">Go</button>
+                    <button type="button" id="page-next" class="secondary">Next</button>
+                  </div>
+                  <p id="page-meta" class="hint"></p>
+                  <div class="column-tools">
+                    <button type="button" id="toggle-columns" class="secondary" aria-expanded="false" aria-controls="column-panel">Columns</button>
+                    <span id="column-count"></span>
+                    <button type="button" id="export-csv" class="secondary" disabled>Full CSV</button>
+                    <button type="button" id="export-pdf" class="secondary" disabled>PDF</button>
+                  </div>
+                </div>
+              </form>
+
+              <div id="column-panel" class="column-panel" hidden>
+                <div class="column-panel-tools">
+                  <input id="column-search" type="search" placeholder="Search columns" spellcheck="false" />
+                  <button type="button" id="columns-all" class="secondary">Check all</button>
+                  <button type="button" id="columns-none" class="secondary">Uncheck all</button>
+                </div>
+                <p class="hint">Check all and uncheck all apply to every column, including ones the search box is hiding. The table is read-only.</p>
+                <div id="column-list" class="column-list"></div>
+              </div>
+
+              <div id="results-region" class="results-region" aria-live="polite"></div>
+
+              <details class="field-notes">
+                <summary>Field notes from the crash event dictionary</summary>
+                <ul id="field-note-list"></ul>
+              </details>
+            </section>
+          </section>
+
+          <section class="view" data-view="settings" id="view-settings" hidden>
+            <div class="settings-grid">
+              <section class="card">
+                <div class="card-head">
+                  <h2>Appearance</h2>
+                </div>
+                <p class="hint">Light and dark palettes follow the PRIME AE lockup: navy, white, and the orange mark.</p>
+                <div id="theme-toggle" class="theme-toggle" role="group" aria-label="Color theme">
+                  <button type="button" class="secondary" data-theme="light" aria-pressed="true">Light</button>
+                  <button type="button" class="secondary" data-theme="dark" aria-pressed="false">Dark</button>
+                </div>
+              </section>
+
+              <section class="card">
+                <div class="card-head">
+                  <h2>Session token</h2>
+                </div>
+                <p id="settings-source" class="hint"></p>
+                <p id="settings-timer" class="timer"></p>
+                <dl>
+                  <div>
+                    <dt>Requested</dt>
+                    <dd id="settings-obtained"></dd>
+                  </div>
+                  <div>
+                    <dt>Expires</dt>
+                    <dd id="settings-expires"></dd>
+                  </div>
+                  <div>
+                    <dt>Time left</dt>
+                    <dd id="settings-remaining"></dd>
+                  </div>
+                </dl>
+                <label for="settings-token">Token in memory</label>
+                <textarea id="settings-token" class="token-mask" readonly rows="4" spellcheck="false"></textarea>
+                <div class="actions">
+                  <button type="button" id="settings-toggle-token" class="secondary" aria-pressed="false">Show token</button>
+                  <button type="button" id="settings-copy" class="secondary">Copy token</button>
+                  <button type="button" id="settings-clear" class="secondary">Clear token</button>
+                </div>
+                <p id="settings-note" class="hint"></p>
+              </section>
+
+              <section class="card">
+                <div class="card-head">
+                  <h2>Paste a token</h2>
+                </div>
+                <p class="hint">
+                  If you already copied a bearer token, paste it here to search without decrypting again.
+                  Expiration is unknown for pasted tokens.
+                </p>
+                <label for="settings-paste">Bearer token</label>
+                <textarea id="settings-paste" rows="4" spellcheck="false" placeholder="Paste an access token"></textarea>
+                <button type="button" id="settings-save" class="primary">Use pasted token</button>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
   </body>
 </html>

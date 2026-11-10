@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { initSearch } from "./search.ts";
+import { go, initRouter } from "./router.ts";
+import { initTheme } from "./theme.ts";
+import { setAppToken, subscribe } from "./session.ts";
+import { initNavSession, initSettings } from "./settings.ts";
 
 type CredentialSummary = {
   fileName: string;
@@ -13,6 +18,11 @@ type TokenInfo = {
   tokenType: string;
   expiresIn: number;
 };
+
+initTheme();
+initRouter();
+initNavSession();
+initSettings();
 
 const fileNameEl = document.querySelector<HTMLParagraphElement>("#file-name")!;
 const dropzone = document.querySelector<HTMLDivElement>("#dropzone")!;
@@ -30,6 +40,7 @@ const buttons = {
   copy: document.querySelector<HTMLButtonElement>("#copy")!,
   refresh: document.querySelector<HTMLButtonElement>("#refresh")!,
   toggle: document.querySelector<HTMLButtonElement>("#toggle-pass")!,
+  search: document.querySelector<HTMLButtonElement>("#go-search")!,
 };
 
 let selectedPath: string | null = null;
@@ -54,7 +65,6 @@ function selectFile(path: string) {
   fileNameEl.textContent = name;
   readyCard.hidden = true;
   tokenCard.hidden = true;
-  tokenEl.value = "";
   setStatus("");
 }
 
@@ -104,10 +114,9 @@ async function decrypt() {
     document.querySelector<HTMLElement>("#sum-id")!.textContent = summary.clientIdHint;
     document.querySelector<HTMLElement>("#sum-exp")!.textContent = summary.expiresAt;
     readyCopy.textContent =
-      "Credentials are unlocked on this computer. Request a temporary API token when you are ready to copy it.";
+      "Credentials are unlocked on this computer. Request a temporary API token when you are ready.";
     readyCard.hidden = false;
     tokenCard.hidden = true;
-    tokenEl.value = "";
     setStatus("Decrypted. Confirm below to request a token.", true);
     readyCard.scrollIntoView({ block: "nearest" });
   } catch (error) {
@@ -127,12 +136,11 @@ async function requestToken() {
     const token = await invoke<TokenInfo>("request_token");
     tokenEl.value = token.accessToken;
     const kind = token.tokenType || "Bearer";
-    tokenMeta.textContent = `${kind} token. It stays valid for ${formatDuration(token.expiresIn)}. Paste it where you need it, then you can close this window.`;
+    tokenMeta.textContent = `${kind} token. It stays valid for ${formatDuration(token.expiresIn)} from this request. Open Search Signal4 Beam, or review the timer in Settings.`;
     tokenCard.hidden = false;
-    setStatus("Token ready to copy.", true);
+    setAppToken(token.accessToken, token.expiresIn);
+    setStatus("Token ready. Open Search Signal4 Beam to query crash events.", true);
     tokenCard.scrollIntoView({ block: "nearest" });
-    tokenEl.focus();
-    tokenEl.select();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   } finally {
@@ -180,11 +188,25 @@ buttons.refresh.addEventListener("click", () => {
 buttons.copy.addEventListener("click", () => {
   void copyToken();
 });
+buttons.search.addEventListener("click", () => {
+  go("search");
+});
 buttons.toggle.addEventListener("click", () => {
   const showing = passphraseEl.type === "text";
   passphraseEl.type = showing ? "password" : "text";
   buttons.toggle.textContent = showing ? "Show" : "Hide";
   buttons.toggle.setAttribute("aria-pressed", String(!showing));
+});
+
+initSearch({ setStatus });
+
+subscribe((session) => {
+  if (session.source === "app" && session.token) {
+    tokenEl.value = session.token;
+  }
+  if (!session.token) {
+    tokenEl.value = "";
+  }
 });
 
 const tauriWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
@@ -200,7 +222,10 @@ if (tauriWindow.__TAURI_INTERNALS__) {
       const path =
         event.payload.paths.find((item) => item.toLowerCase().endsWith(".asc")) ??
         event.payload.paths[0];
-      if (path) selectFile(path);
+      if (path) {
+        go("token");
+        selectFile(path);
+      }
     }
   });
 }

@@ -14,9 +14,9 @@
     "windows": [
       {
         "title": "Beam Token",
-        "width": 560,
-        "height": 780,
-        "minWidth": 460,
+        "width": 1180,
+        "height": 860,
+        "minWidth": 760,
         "minHeight": 640,
         "center": true,
         "dragDropEnabled": true
