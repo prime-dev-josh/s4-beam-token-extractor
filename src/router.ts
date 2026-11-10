@@ -19,6 +19,7 @@ type Listener = (route: Route) => void;
 
 const listeners = new Set<Listener>();
 let current: Route = "home";
+let navigationLocked = false;
 
 export function getRoute(): Route {
   return current;
@@ -28,7 +29,12 @@ export function routeTitle(route: Route = current): string {
   return TITLES[route];
 }
 
+export function setNavigationLocked(locked: boolean) {
+  navigationLocked = locked;
+}
+
 export function go(route: Route) {
+  if (navigationLocked) return;
   const hash = route === "home" ? "#/" : `#/${route}`;
   if (window.location.hash === hash) {
     apply(route);
@@ -50,7 +56,12 @@ export function subscribeRoute(listener: Listener): () => void {
 
 function syncFromHash() {
   const path = window.location.hash.replace(/^#/, "") || "/";
-  apply(ROUTES[path] ?? "home");
+  const next = ROUTES[path] ?? "home";
+  if (navigationLocked && next !== current) {
+    window.location.hash = current === "home" ? "#/" : `#/${current}`;
+    return;
+  }
+  apply(next);
 }
 
 function apply(route: Route) {

@@ -18,8 +18,7 @@
           <img class="brand-mark light" src="/brand/prime-ae-light.png" alt="PRIME AE" />
           <img class="brand-mark dark" src="/brand/prime-ae-dark.png" alt="PRIME AE" />
           <span>
-            <strong>Beam</strong>
-            <small>Signal4</small>
+            <strong>Signal4 Beam</strong>
           </span>
         </a>
         <nav>
@@ -40,10 +39,10 @@
         <main>
           <section class="view title-screen" data-view="home" id="view-home">
             <div class="title-stack">
-              <p class="eyebrow">PRIME AE · Signal4</p>
-              <h2>BEAM</h2>
+              <p class="eyebrow">PRIME AE</p>
+              <h2>Signal4 Beam</h2>
               <p class="lede">
-                Crash data, from credentials to search. Tokens stay in memory for this session.
+                Crash data, from credentials to search. Tokens are kept for this tab (including after refresh) until you clear them or close the tab.
               </p>
             </div>
             <nav class="title-menu" aria-label="Start">
@@ -76,7 +75,7 @@
 
           <section class="view" data-view="token" id="view-token" hidden>
             <p class="lede">
-              Open the encrypted credentials file Signal4 sent you, unlock it with
+              Open the encrypted credentials file Signal4 Beam sent you, unlock it with
               your passphrase, then request a short-lived access token.
             </p>
             <div class="setup-grid">
@@ -87,7 +86,7 @@
                 </div>
                 <p class="hint">
                   Drop the <code>.asc</code> file here, or choose it from disk. This is
-                  the file Signal4 encrypted for you, not your public key.
+                  the file Signal4 Beam encrypted for you, not your public key.
                 </p>
                 <div id="dropzone" class="dropzone" tabindex="0">
                   <button type="button" id="choose-file" class="secondary">Choose file</button>
@@ -176,7 +175,7 @@
                     <li><strong>Records touched during a window.</strong> Update time range, such as <code>2026-07-15T00:00:00~2026-07-15T23:59:59</code>.</li>
                     <li><strong>Crashes in one period that changed in another.</strong> Set both filters. Example: crashes in January 2026 and updates in March 2026.</li>
                     <li><strong>How many records match.</strong> Totals load automatically once a date filter is complete. Page is left off that request.</li>
-                    <li><strong>A range of Beam pages.</strong> Each API page holds 500 records. Search fetches every page in the from–to range.</li>
+                    <li><strong>A range of Signal4 Beam pages.</strong> Each API page holds 500 records. Search fetches every page in the from–to range.</li>
                   </ul>
                 </div>
                 <p class="hint">
@@ -221,7 +220,7 @@
 
                   <fieldset id="update-field">
                     <legend>Update time</legend>
-                    <p class="hint">When Signal4 last updated the record. <code>YYYY-MM-DDTHH:mm:ss</code>, through now. A range joins the timestamps with <code>~</code>.</p>
+                    <p class="hint">When Signal4 Beam last updated the record. <code>YYYY-MM-DDTHH:mm:ss</code>, through now. A range joins the timestamps with <code>~</code>.</p>
                     <label for="update-mode">How to match</label>
                     <select id="update-mode">
                       <option value="off" selected>Not used</option>
@@ -247,29 +246,54 @@
                   </fieldset>
 
                   <p id="slow-note" class="warn span-2" hidden>
-                    This search uses only the update time, so Beam scans the full table and the response can be slow. Narrow the window, or add a crash date range.
+                    This search uses only the update time, so Signal4 Beam scans the full table and the response can be slow. Narrow the window, or add a crash date range.
                   </p>
 
-                  <fieldset class="span-2" id="page-range-field">
+                  <div id="overview-panel" class="overview-panel span-2">
+                    <p id="overview-status">Add a crash date, an update time, or both to load match totals.</p>
+                    <p id="overview-url" class="overview-url query-preview" hidden></p>
+                    <dl id="overview-stats" hidden>
+                      <div><dt>Total records</dt><dd id="overview-records">—</dd></div>
+                      <div><dt>Total pages</dt><dd id="overview-pages">—</dd></div>
+                      <div><dt>Page size</dt><dd id="overview-size">—</dd></div>
+                    </dl>
+                  </div>
+
+                  <fieldset class="span-2" id="page-range-field" hidden disabled>
                     <legend>API page range</legend>
-                    <p class="hint">Beam returns 500 records per page. Search fetches every page in this inclusive range. Results paging on the table tab is separate and local.</p>
-                    <div class="range-grid">
-                      <div>
-                        <label for="page-from">From page</label>
-                        <input id="page-from" type="number" min="1" step="1" value="1" inputmode="numeric" />
+                    <p class="hint">Signal4 Beam returns 500 records per page. Search fetches every page in this inclusive range. Results paging on the table tab is separate and local.</p>
+                    <div class="page-range-wrap">
+                      <div class="page-range-values">
+                        <label for="page-from">From page <output id="page-from-out" for="page-from">1</output></label>
+                        <label for="page-to">To page <output id="page-to-out" for="page-to">1</output></label>
                       </div>
-                      <div>
-                        <label for="page-to">To page</label>
-                        <input id="page-to" type="number" min="1" step="1" value="1" inputmode="numeric" />
+                      <div class="dual-range" id="page-range-slider">
+                        <div class="dual-range-fill" id="page-range-fill" aria-hidden="true"></div>
+                        <input
+                          id="page-from"
+                          type="range"
+                          min="1"
+                          max="1"
+                          step="1"
+                          value="1"
+                          aria-valuemin="1"
+                          aria-valuemax="1"
+                          aria-valuenow="1"
+                          aria-label="From page"
+                        />
+                        <input
+                          id="page-to"
+                          type="range"
+                          min="1"
+                          max="1"
+                          step="1"
+                          value="1"
+                          aria-valuemin="1"
+                          aria-valuemax="1"
+                          aria-valuenow="1"
+                          aria-label="To page"
+                        />
                       </div>
-                    </div>
-                    <div id="overview-panel" class="overview-panel">
-                      <p id="overview-status">Add a crash date, an update time, or both to load match totals.</p>
-                      <dl id="overview-stats" hidden>
-                        <div><dt>Total records</dt><dd id="overview-records">—</dd></div>
-                        <div><dt>Total pages</dt><dd id="overview-pages">—</dd></div>
-                        <div><dt>Page size</dt><dd id="overview-size">—</dd></div>
-                      </dl>
                     </div>
                     <p id="fetch-scope" class="warn" hidden></p>
                   </fieldset>
@@ -352,18 +376,32 @@
 
           <section class="view" data-view="settings" id="view-settings" hidden>
             <div class="settings-grid">
-              <section class="card">
-                <div class="card-head">
-                  <h2>Appearance</h2>
-                </div>
-                <p class="hint">Light and dark palettes follow the PRIME AE lockup: navy, white, and the orange mark.</p>
-                <div id="theme-toggle" class="theme-toggle" role="group" aria-label="Color theme">
-                  <button type="button" class="secondary" data-theme="light" aria-pressed="true">Light</button>
-                  <button type="button" class="secondary" data-theme="dark" aria-pressed="false">Dark</button>
-                </div>
-              </section>
+              <div class="settings-stack">
+                <section class="card settings-card-compact">
+                  <div class="card-head">
+                    <h2>Appearance</h2>
+                  </div>
+                  <p class="hint">PRIME AE lockup: navy, white, and the orange mark.</p>
+                  <div id="theme-toggle" class="theme-toggle" role="group" aria-label="Color theme">
+                    <button type="button" class="secondary" data-theme="light" aria-pressed="true">Light</button>
+                    <button type="button" class="secondary" data-theme="dark" aria-pressed="false">Dark</button>
+                  </div>
+                </section>
 
-              <section class="card">
+                <section class="card settings-card-compact">
+                  <div class="card-head">
+                    <h2>Paste a token</h2>
+                  </div>
+                  <p class="hint">
+                    Paste a bearer token to search without decrypting. Expiration is unknown for pasted tokens.
+                  </p>
+                  <label for="settings-paste">Bearer token</label>
+                  <textarea id="settings-paste" rows="3" spellcheck="false" placeholder="Paste an access token"></textarea>
+                  <button type="button" id="settings-save" class="primary">Use pasted token</button>
+                </section>
+              </div>
+
+              <section class="card settings-card-compact settings-session">
                 <div class="card-head">
                   <h2>Session token</h2>
                 </div>
@@ -384,30 +422,86 @@
                   </div>
                 </dl>
                 <label for="settings-token">Token in memory</label>
-                <textarea id="settings-token" class="token-mask" readonly rows="4" spellcheck="false"></textarea>
+                <textarea id="settings-token" class="token-mask" readonly rows="3" spellcheck="false"></textarea>
                 <div class="actions">
                   <button type="button" id="settings-toggle-token" class="secondary" aria-pressed="false">Show token</button>
                   <button type="button" id="settings-copy" class="secondary">Copy token</button>
                   <button type="button" id="settings-clear" class="secondary">Clear token</button>
                 </div>
-                <p id="settings-note" class="hint"></p>
-              </section>
-
-              <section class="card">
-                <div class="card-head">
-                  <h2>Paste a token</h2>
-                </div>
-                <p class="hint">
-                  If you already copied a bearer token, paste it here to search without decrypting again.
-                  Expiration is unknown for pasted tokens.
-                </p>
-                <label for="settings-paste">Bearer token</label>
-                <textarea id="settings-paste" rows="4" spellcheck="false" placeholder="Paste an access token"></textarea>
-                <button type="button" id="settings-save" class="primary">Use pasted token</button>
+                <p id="settings-note" class="hint settings-note"></p>
               </section>
             </div>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div
+      id="export-alert"
+      class="export-alert"
+      hidden
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="export-alert-title"
+      aria-describedby="export-alert-file export-alert-path export-alert-detail"
+    >
+      <div class="export-alert-panel">
+        <span class="hud-corner tl" aria-hidden="true"></span>
+        <span class="hud-corner tr" aria-hidden="true"></span>
+        <span class="hud-corner bl" aria-hidden="true"></span>
+        <span class="hud-corner br" aria-hidden="true"></span>
+        <p class="loading-kicker">PRIME AE · Signal4 Beam</p>
+        <h2 id="export-alert-title">Export complete</h2>
+        <p class="export-alert-lede">The file was saved to disk.</p>
+        <dl class="export-alert-meta">
+          <div>
+            <dt>File name</dt>
+            <dd id="export-alert-file"></dd>
+          </div>
+          <div>
+            <dt>Location</dt>
+            <dd id="export-alert-path"></dd>
+          </div>
+        </dl>
+        <p id="export-alert-detail" class="export-alert-detail"></p>
+        <button type="button" id="export-alert-ok" class="primary export-alert-ok">OK</button>
+      </div>
+    </div>
+
+    <div
+      id="search-loading"
+      class="search-loading"
+      hidden
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="loading-title"
+      aria-describedby="loading-status loading-lock"
+      tabindex="-1"
+    >
+      <div class="loading-hud">
+        <span class="hud-corner tl" aria-hidden="true"></span>
+        <span class="hud-corner tr" aria-hidden="true"></span>
+        <span class="hud-corner bl" aria-hidden="true"></span>
+        <span class="hud-corner br" aria-hidden="true"></span>
+        <p class="loading-kicker">PRIME AE · Signal4 Beam</p>
+        <h2 id="loading-title">Now Loading<span class="loading-ellipsis" aria-hidden="true"></span></h2>
+        <div class="loading-radar" aria-hidden="true">
+          <span class="loading-ring r1"></span>
+          <span class="loading-ring r2"></span>
+          <span class="loading-ring r3"></span>
+          <span class="loading-sweep"></span>
+          <span class="loading-cross"></span>
+          <span class="loading-core"></span>
+        </div>
+        <p id="loading-flavor" class="loading-flavor">Opening Signal4 Beam channel</p>
+        <p id="loading-status" class="loading-status">Querying crash events</p>
+        <div class="loading-timer">
+          <span class="loading-timer-label">Elapsed</span>
+          <span id="loading-elapsed" class="loading-timer-value">00:00.0</span>
+        </div>
+        <p id="loading-lock" class="loading-lock">Input locked while Signal4 Beam responds · Cancel to change the query</p>
+        <button type="button" id="loading-cancel" class="secondary loading-cancel">Cancel search</button>
+        <p class="sr-only" id="loading-announce" aria-live="assertive"></p>
       </div>
     </div>
   </body>

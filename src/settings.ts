@@ -67,7 +67,7 @@ export function initSettings() {
       expiresEl.textContent = "—";
       remainingEl.textContent = "—";
       noteEl.textContent =
-        "Request a token on Get API Token, or paste a bearer token copied from another session. Tokens stay in memory only.";
+        "Request a token on Get API Token, or paste a bearer token copied from another session. Tokens are kept for this tab (including after refresh) until you clear them or close the tab.";
       return;
     }
     if (session.source === "pasted") {
@@ -77,7 +77,7 @@ export function initSettings() {
       expiresEl.textContent = "Unknown";
       remainingEl.textContent = "Unknown";
       noteEl.textContent =
-        "A pasted token does not include an expiration time. Beam access tokens last one hour from the moment they were issued. If search starts failing, request or paste a new token.";
+        "A pasted token does not include an expiration time. Signal4 Beam access tokens last one hour from the moment they were issued. If search starts failing, request or paste a new token.";
       return;
     }
     sourceEl.textContent = "This token was requested in the app.";
@@ -89,7 +89,7 @@ export function initSettings() {
     remainingEl.textContent = session.expired ? "Expired" : formatRemaining(session.remainingMs);
     noteEl.textContent = session.expired
       ? "This token has reached the one-hour window from when it was requested. Get a new token before searching."
-      : "The timer started when this token was requested in the app. Beam access tokens last one hour from issue.";
+      : "The timer started when this token was requested in the app. Signal4 Beam access tokens last one hour from issue.";
   }
 
   function renderTheme(theme: Theme) {

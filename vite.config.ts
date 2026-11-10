@@ -15,6 +15,13 @@ export default defineConfig(() => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    proxy: {
+      "/api/extract": {
+        target: "https://beam.signal4lab.com",
+        changeOrigin: true,
+        secure: true,
+      },
+    },
     hmr: host
       ? {
           protocol: "ws",
@@ -25,6 +32,17 @@ export default defineConfig(() => ({
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
+    },
+  },
+  preview: {
+    port: 1420,
+    strictPort: true,
+    proxy: {
+      "/api/extract": {
+        target: "https://beam.signal4lab.com",
+        changeOrigin: true,
+        secure: true,
+      },
     },
   },
 }));

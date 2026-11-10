@@ -12,6 +12,14 @@ export type SessionSnapshot = {
 type Listener = (snapshot: SessionSnapshot) => void;
 
 const listeners = new Set<Listener>();
+const STORAGE_KEY = "beam-api-session";
+
+type StoredSession = {
+  token: string;
+  source: TokenSource | null;
+  obtainedAt: number | null;
+  expiresAt: number | null;
+};
 
 let token = "";
 let source: TokenSource | null = null;
@@ -39,6 +47,7 @@ export function setAppToken(value: string, expiresIn: number) {
   expiresAt =
     Number.isFinite(expiresIn) && expiresIn > 0 ? now + expiresIn * 1000 : now + 3600 * 1000;
   startTicker();
+  persistStorage();
   notify();
 }
 
@@ -48,6 +57,7 @@ export function setPastedToken(value: string) {
   obtainedAt = token ? Date.now() : null;
   expiresAt = null;
   stopTicker();
+  persistStorage();
   notify();
 }
 
@@ -57,6 +67,7 @@ export function clearToken() {
   obtainedAt = null;
   expiresAt = null;
   stopTicker();
+  persistStorage();
   notify();
 }
 
@@ -116,3 +127,39 @@ function stopTicker() {
   window.clearInterval(ticker);
   ticker = null;
 }
+
+function persistStorage() {
+  try {
+    if (!token.trim()) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+    const data: StoredSession = { token, source, obtainedAt, expiresAt };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage may be unavailable (privacy mode, quota).
+  }
+}
+
+function loadStorage() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw) as StoredSession;
+    if (typeof data.token !== "string" || !data.token.trim()) return;
+    if (data.source !== "app" && data.source !== "pasted" && data.source !== null) return;
+    token = data.token.trim();
+    source = data.source;
+    obtainedAt = typeof data.obtainedAt === "number" ? data.obtainedAt : null;
+    expiresAt = typeof data.expiresAt === "number" ? data.expiresAt : null;
+    if (expiresAt != null) startTicker();
+  } catch {
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+loadStorage();

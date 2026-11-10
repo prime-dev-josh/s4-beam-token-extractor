@@ -1,5 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
 import { CRASH_FIELDS } from "./crash-fields.ts";
+import {
+  formatRecordsSearchUrls,
+  formatSummarySearchUrl,
+  searchCrashEvents,
+  type CrashSearchResponse,
+} from "./crash-search-api.ts";
 import {
   filterKey,
   formatSearchPath,
@@ -9,12 +14,21 @@ import {
   type SearchDraft,
   type SearchRequest,
 } from "./crash-query.ts";
+import {
+  bindPageRange,
+  clampPageRange,
+  syncPageRangeUi,
+} from "./page-range-slider.ts";
 import { formatRemaining, getToken, hasToken, subscribe } from "./session.ts";
 import { go, subscribeRoute } from "./router.ts";
+import { showExportAlert } from "./export-alert.ts";
+import { isSearchAborted } from "./search-abort.ts";
+import { hideSearchLoading, showSearchLoading, updateSearchLoading } from "./search-loading.ts";
 import {
   csvFromSnapshot,
   downloadBlob,
   exportFilename,
+  resolveDownloadLocation,
   formatCell,
   pdfFromSnapshot,
   snapshotRecords,
@@ -49,11 +63,6 @@ type CrashPayload = {
   };
 };
 
-type CrashSearchResponse = {
-  httpStatus: number;
-  payload: CrashPayload;
-};
-
 type SearchOptions = {
   setStatus: (message: string, ok?: boolean) => void;
 };
@@ -86,8 +95,12 @@ export function initSearch(options: SearchOptions) {
   const activeQuery = required<HTMLParagraphElement>("#active-query");
   const pageFromInput = required<HTMLInputElement>("#page-from");
   const pageToInput = required<HTMLInputElement>("#page-to");
+  const pageRangeFill = required<HTMLElement>("#page-range-fill");
+  const pageFromOut = required<HTMLOutputElement>("#page-from-out");
+  const pageToOut = required<HTMLOutputElement>("#page-to-out");
   const pageRangeField = required<HTMLFieldSetElement>("#page-range-field");
   const overviewStatus = required<HTMLParagraphElement>("#overview-status");
+  const overviewUrl = required<HTMLParagraphElement>("#overview-url");
   const overviewStats = required<HTMLElement>("#overview-stats");
   const overviewRecords = required<HTMLElement>("#overview-records");
   const overviewPages = required<HTMLElement>("#overview-pages");
@@ -139,6 +152,11 @@ export function initSearch(options: SearchOptions) {
   let viewPageSize = 50;
   let openFilterKey: string | null = null;
   let summaryGen = 0;
+  let overviewTimerId = 0;
+  let overviewAbort: AbortController | null = null;
+  let recordSearchId = 0;
+  let recordSearchAbort: AbortController | null = null;
+  const OVERVIEW_DEBOUNCE_MS = 750;
 
   required<HTMLButtonElement>("#search-go-token").addEventListener("click", () => {
     go("token");
@@ -174,34 +192,40 @@ export function initSearch(options: SearchOptions) {
   renderColumnList();
   renderFieldNotes();
   syncModes();
+  renderOverview("idle");
   refreshChrome();
   renderResults();
   showTab("form");
 
-  for (const input of [crashDay, crashStart, crashEnd, updateAt, updateStart, updateEnd, pageFromInput, pageToInput]) {
+  for (const input of [crashDay, crashStart, crashEnd, updateAt, updateStart, updateEnd]) {
     input.addEventListener("input", () => {
       clearFieldState();
       refreshChrome();
     });
   }
+  bindPageRange(pageFromInput, pageToInput, pageRangeFill, pageFromOut, pageToOut, () => {
+    clearFieldState();
+    refreshChrome();
+  });
   for (const input of [crashDay, crashStart, crashEnd, updateAt, updateStart, updateEnd]) {
     input.addEventListener("change", () => {
+      invalidateOverviewIfDraftDrifted();
       scheduleOverview();
       refreshChrome();
     });
   }
   crashMode.addEventListener("change", () => {
     syncModes();
+    invalidateOverviewIfDraftDrifted();
     scheduleOverview();
     refreshChrome();
   });
   updateMode.addEventListener("change", () => {
     syncModes();
+    invalidateOverviewIfDraftDrifted();
     scheduleOverview();
     refreshChrome();
   });
-  pageFromInput.addEventListener("change", refreshChrome);
-  pageToInput.addEventListener("change", refreshChrome);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void executeForm();
@@ -320,15 +344,32 @@ export function initSearch(options: SearchOptions) {
       return;
     }
     if (!ensureToken()) return;
+    searchHelpPanel.hidden = true;
+    searchHelp.setAttribute("aria-expanded", "false");
+    closeFilterPop();
+    setColumnPanel(false);
     const ok = await runRange(prepared.request);
-    if (ok) showTab("table");
+    if (ok) {
+      showTab("table");
+      tabTable.focus();
+    }
   }
 
   function scheduleOverview() {
+    window.clearTimeout(overviewTimerId);
+    overviewAbort?.abort();
+    overviewAbort = null;
     const gen = ++summaryGen;
-    window.setTimeout(() => {
+    overviewTimerId = window.setTimeout(() => {
+      overviewTimerId = 0;
       void loadOverview(gen);
-    }, 400);
+    }, OVERVIEW_DEBOUNCE_MS);
+  }
+
+  function cancelRecordSearch() {
+    recordSearchId += 1;
+    recordSearchAbort?.abort();
+    recordSearchAbort = null;
   }
 
   async function loadOverview(gen: number) {
@@ -355,9 +396,15 @@ export function initSearch(options: SearchOptions) {
       return;
     }
     renderOverview("loading");
+    overviewAbort?.abort();
+    const abort = new AbortController();
+    overviewAbort = abort;
     try {
-      const result = await invokeSearch({ ...prepared.request, pageFrom: null, pageTo: null });
-      if (gen !== summaryGen) return;
+      const result = await invokeSearch(
+        { ...prepared.request, pageFrom: null, pageTo: null },
+        abort.signal,
+      );
+      if (gen !== summaryGen || abort.signal.aborted) return;
       const failure = readFailure(result);
       if (failure) {
         totals = null;
@@ -369,7 +416,7 @@ export function initSearch(options: SearchOptions) {
       if (!summary) {
         totals = null;
         overviewKey = null;
-        renderOverview("error", "The crash event service did not return totals.");
+        renderOverview("error", "The Signal4 Beam crash event service did not return totals.");
         return;
       }
       rememberSummary(summary);
@@ -379,13 +426,16 @@ export function initSearch(options: SearchOptions) {
         pageToInput.value = String(Math.max(1, totals.totalPages));
         rangeAutoKey = key;
       }
+      applyPageRangeBounds();
       renderOverview("ready");
       refreshChrome();
     } catch (error) {
-      if (gen !== summaryGen) return;
+      if (gen !== summaryGen || isSearchAborted(error)) return;
       totals = null;
       overviewKey = null;
       renderOverview("error", error instanceof Error ? error.message : String(error));
+    } finally {
+      if (overviewAbort === abort) overviewAbort = null;
     }
   }
 
@@ -393,24 +443,69 @@ export function initSearch(options: SearchOptions) {
     overviewStats.hidden = state !== "ready";
     if (state === "idle") {
       overviewStatus.textContent = "Add a crash date, an update time, or both to load match totals.";
-      return;
-    }
-    if (state === "need-token") {
+    } else if (state === "need-token") {
       overviewStatus.textContent = "Get an API token to load match totals for this filter.";
-      return;
-    }
-    if (state === "loading") {
+    } else if (state === "loading") {
       overviewStatus.textContent = "Loading match totals…";
-      return;
-    }
-    if (state === "error") {
+    } else if (state === "error") {
       overviewStatus.textContent = message || "Could not load match totals.";
+    } else {
+      overviewStatus.textContent =
+        "Match totals loaded. The To page handle is set to the last Signal4 Beam page.";
+      overviewRecords.textContent = totals ? totals.totalRecords.toLocaleString() : "—";
+      overviewPages.textContent = totals ? totals.totalPages.toLocaleString() : "—";
+      overviewSize.textContent = totals ? totals.pageSize.toLocaleString() : "—";
+    }
+    syncOverviewUrl();
+    syncPageRangeAccess();
+  }
+
+  function syncOverviewUrl() {
+    stampDateLimits();
+    const prepared = prepareSearch(readDraft(), "summary");
+    if (!prepared.ok) {
+      overviewUrl.hidden = true;
+      overviewUrl.textContent = "";
       return;
     }
-    overviewStatus.textContent = "Match totals loaded. The To page field is set to the last Beam page.";
-    overviewRecords.textContent = totals ? totals.totalRecords.toLocaleString() : "—";
-    overviewPages.textContent = totals ? totals.totalPages.toLocaleString() : "—";
-    overviewSize.textContent = totals ? totals.pageSize.toLocaleString() : "—";
+    overviewUrl.hidden = false;
+    overviewUrl.textContent = formatSummarySearchUrl(prepared.request);
+  }
+
+  function pageRangeReady(): boolean {
+    stampDateLimits();
+    const prepared = prepareSearch(readDraft(), "summary");
+    if (!prepared.ok || !totals) return false;
+    return overviewKey === filterKey(prepared.request);
+  }
+
+  function syncPageRangeAccess() {
+    const unlocked = pageRangeReady();
+    pageRangeField.hidden = !unlocked;
+    pageRangeField.disabled = !unlocked;
+    pageFromInput.disabled = !unlocked || busy;
+    pageToInput.disabled = !unlocked || busy;
+  }
+
+  function invalidateOverviewIfDraftDrifted() {
+    const prepared = prepareSearch(readDraft(), "summary");
+    if (!prepared.ok) {
+      totals = null;
+      overviewKey = null;
+      rangeAutoKey = null;
+      renderOverview("idle");
+      return;
+    }
+    const key = filterKey(prepared.request);
+    if (overviewKey === key && totals) return;
+    totals = null;
+    overviewKey = null;
+    rangeAutoKey = null;
+    if (!tokenReady) {
+      renderOverview("need-token");
+      return;
+    }
+    renderOverview("loading");
   }
 
   async function runRange(request: SearchRequest): Promise<boolean> {
@@ -421,14 +516,31 @@ export function initSearch(options: SearchOptions) {
     clearError();
     const slow = !request.crashDate && !!request.s4UpdateDate;
     const collected: Record<string, unknown>[] = [];
+    const statusFor = (page: number) =>
+      slow
+        ? `Fetching Signal4 Beam page ${page} of ${to}. A search that uses only the update time can take a while.`
+        : `Fetching Signal4 Beam page ${page} of ${to}.`;
+    cancelRecordSearch();
+    const searchId = recordSearchId;
+    const abort = new AbortController();
+    recordSearchAbort = abort;
+    showSearchLoading(statusFor(from), () => {
+      if (searchId === recordSearchId) cancelRecordSearch();
+    });
     try {
       for (let page = from; page <= to; page += 1) {
-        options.setStatus(
-          slow
-            ? `Fetching Beam page ${page} of ${to}. A search that uses only the update time can take a while.`
-            : `Fetching Beam page ${page} of ${to}.`,
+        if (searchId !== recordSearchId || abort.signal.aborted) {
+          options.setStatus("Search cancelled. Adjust the query and try again.", true);
+          showTab("form");
+          return false;
+        }
+        const status = statusFor(page);
+        options.setStatus(status);
+        updateSearchLoading(status);
+        const result = await invokeSearch(
+          { ...request, pageFrom: page, pageTo: page },
+          abort.signal,
         );
-        const result = await invokeSearch({ ...request, pageFrom: page, pageTo: page });
         const failure = readFailure(result);
         if (failure) {
           showError(failure, result.httpStatus === 0 ? "local" : "api");
@@ -438,12 +550,12 @@ export function initSearch(options: SearchOptions) {
         if (!Array.isArray(result.payload.items)) {
           showError(
             {
-              message: "The crash event service returned an unexpected response.",
+              message: "The Signal4 Beam crash event service returned an unexpected response.",
               details: "A page of records arrives as items.",
             },
             "api",
           );
-          options.setStatus("Unexpected response from the crash event service.");
+          options.setStatus("Unexpected response from the Signal4 Beam crash event service.");
           return false;
         }
         collected.push(...result.payload.items.filter(isRecord));
@@ -459,34 +571,50 @@ export function initSearch(options: SearchOptions) {
       renderResults();
       options.setStatus(
         items.length === 0
-          ? "The crash event service returned no records for this page range."
-          : `Loaded ${items.length.toLocaleString()} crash events from Beam pages ${from}–${to}.`,
+          ? "The Signal4 Beam crash event service returned no records for this page range."
+          : `Loaded ${items.length.toLocaleString()} crash events from Signal4 Beam pages ${from}–${to}.`,
         true,
       );
       return true;
     } catch (error) {
+      if (isSearchAborted(error) || searchId !== recordSearchId) {
+        options.setStatus("Search cancelled. Adjust the query and try again.", true);
+        showTab("form");
+        return false;
+      }
       const message = error instanceof Error ? error.message : String(error);
+      const local =
+        /invoke/i.test(message) ||
+        /desktop app/i.test(message) ||
+        /tauri dev/i.test(message);
       showError(
         {
-          message: "Could not reach the Beam crash event service.",
-          details: message,
+          message: local
+            ? "Search is not available in this browser view."
+            : "Could not reach the Signal4 Beam crash event service.",
+          details: local
+            ? "Run npm run tauri dev or the installed Beam Token app. With npm run dev, a pasted token can search through the Vite proxy."
+            : message,
         },
-        "api",
+        local ? "local" : "api",
       );
       options.setStatus(message);
       return false;
     } finally {
+      if (searchId === recordSearchId) {
+        recordSearchAbort = null;
+      }
+      hideSearchLoading();
       busy = false;
       setSearchEnabled(tokenReady);
     }
   }
 
-  async function invokeSearch(request: SearchRequest): Promise<CrashSearchResponse> {
-    const args: Record<string, unknown> = { accessToken: getToken() };
-    if (request.crashDate) args.crashDate = request.crashDate;
-    if (request.s4UpdateDate) args.s4UpdateDate = request.s4UpdateDate;
-    if (request.pageFrom != null) args.page = request.pageFrom;
-    return invoke<CrashSearchResponse>("search_crash_events", args);
+  async function invokeSearch(
+    request: SearchRequest,
+    signal?: AbortSignal,
+  ): Promise<CrashSearchResponse> {
+    return searchCrashEvents(getToken(), request, { signal });
   }
 
   function rememberSummary(summary: NonNullable<CrashPayload["summary"]>) {
@@ -535,13 +663,29 @@ export function initSearch(options: SearchOptions) {
     slowNote.hidden = !(updateMode.value !== "off" && crashMode.value === "off");
   }
 
+  function applyPageRangeBounds() {
+    const maxPages = totals && totals.totalPages > 0 ? totals.totalPages : null;
+    clampPageRange(pageFromInput, pageToInput, maxPages);
+    syncPageRangeUi(pageFromInput, pageToInput, pageRangeFill, pageFromOut, pageToOut);
+  }
+
   function refreshChrome() {
     stampDateLimits();
     syncModes();
+    syncOverviewUrl();
+    syncPageRangeAccess();
+    if (pageRangeReady()) {
+      applyPageRangeBounds();
+    }
     const prepared = prepareSearch(readDraft(), "records");
-    preview.textContent = prepared.ok
-      ? `Search records fetches ${formatSearchPath(prepared.request)}. Totals load automatically with page left off.`
-      : "Add a crash date, an update time, or both. At least one is required. Search fetches every Beam page in the from–to range.";
+    if (!prepared.ok) {
+      preview.textContent =
+        "Add a crash date, an update time, or both. At least one is required to preview request URLs.";
+    } else if (pageRangeReady()) {
+      preview.textContent = formatRecordsSearchUrls(prepared.request);
+    } else {
+      preview.textContent = formatSummarySearchUrl(prepared.request);
+    }
     if (active) {
       const path = formatSearchPath({ ...active, pageFrom: fetchedFrom, pageTo: fetchedTo });
       const draftKey = currentFilterKey();
@@ -561,7 +705,7 @@ export function initSearch(options: SearchOptions) {
   function updateFetchScope(request: SearchRequest | null) {
     fetchScope.hidden = true;
     fetchScope.className = "warn";
-    if (!request || request.pageFrom == null || request.pageTo == null) return;
+    if (!pageRangeReady() || !request || request.pageFrom == null || request.pageTo == null) return;
     const pages = request.pageTo - request.pageFrom + 1;
     const cap = pages * (totals?.pageSize ?? 500);
     const coversAll =
@@ -572,11 +716,11 @@ export function initSearch(options: SearchOptions) {
     if (coversAll && totals) {
       fetchScope.hidden = false;
       fetchScope.className = "warn fetch-all";
-      fetchScope.textContent = `This search will fetch all ${totals.totalPages.toLocaleString()} Beam pages, up to ${totals.totalRecords.toLocaleString()} records.`;
+      fetchScope.textContent = `This search will fetch all ${totals.totalPages.toLocaleString()} Signal4 Beam pages, up to ${totals.totalRecords.toLocaleString()} records.`;
       return;
     }
     fetchScope.hidden = false;
-    fetchScope.textContent = `This search will fetch Beam pages ${request.pageFrom}–${request.pageTo} (${pages.toLocaleString()} pages, up to ${cap.toLocaleString()} records).`;
+    fetchScope.textContent = `This search will fetch Signal4 Beam pages ${request.pageFrom}–${request.pageTo} (${pages.toLocaleString()} pages, up to ${cap.toLocaleString()} records).`;
   }
 
   function visibleFields() {
@@ -702,27 +846,31 @@ export function initSearch(options: SearchOptions) {
     exportCsv.disabled = true;
     exportPdf.disabled = true;
     try {
+      const rowCount = snapshot.rows.length;
+      const columnCount = snapshot.headers.length;
       if (kind === "csv") {
         downloadBlob(
           filename,
           new Blob([csvFromSnapshot(snapshot)], { type: "text/csv;charset=utf-8" }),
         );
         options.setStatus(
-          `CSV saved with ${snapshot.headers.length} columns and ${snapshot.rows.length.toLocaleString()} fetched rows.`,
+          `CSV saved with ${columnCount} columns and ${rowCount.toLocaleString()} fetched rows.`,
           true,
         );
-        return;
+      } else {
+        options.setStatus("Building PDF.");
+        const blob = await pdfFromSnapshot(snapshot, {
+          title: "Signal4 Beam crash events",
+          subtitle,
+        });
+        downloadBlob(filename, blob);
+        options.setStatus(
+          `PDF saved with ${columnCount} columns and ${rowCount.toLocaleString()} fetched rows.`,
+          true,
+        );
       }
-      options.setStatus("Building PDF.");
-      const blob = await pdfFromSnapshot(snapshot, {
-        title: "Signal4 Beam crash events",
-        subtitle,
-      });
-      downloadBlob(filename, blob);
-      options.setStatus(
-        `PDF saved with ${snapshot.headers.length} columns and ${snapshot.rows.length.toLocaleString()} fetched rows.`,
-        true,
-      );
+      const location = await resolveDownloadLocation(filename);
+      showExportAlert({ kind, filename, location, rowCount, columnCount });
     } catch (error) {
       options.setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -733,7 +881,7 @@ export function initSearch(options: SearchOptions) {
   function renderColumnList() {
     columnList.replaceChildren(
       columnGroup("Crash report", CRASH_FIELDS.filter((field) => !field.key.startsWith("s4_"))),
-      columnGroup("Signal4 derived", CRASH_FIELDS.filter((field) => field.key.startsWith("s4_"))),
+      columnGroup("Signal4 Beam derived", CRASH_FIELDS.filter((field) => field.key.startsWith("s4_"))),
     );
   }
 
@@ -855,7 +1003,7 @@ export function initSearch(options: SearchOptions) {
     errorCause.textContent = error.code != null && ERROR_CAUSES[error.code] ? `Cause: ${ERROR_CAUSES[error.code]}` : "";
     errorSource.textContent = source === "local"
       ? "Checked before the request was sent."
-      : "Returned by the crash event service.";
+      : "Returned by the Signal4 Beam crash event service.";
     errorBox.hidden = false;
     showTab("form");
     errorBox.scrollIntoView({ block: "nearest" });
@@ -946,7 +1094,7 @@ function readFailure(result: CrashSearchResponse): QueryError | null {
     ? error.message
     : httpFailed
       ? `Request failed (HTTP ${result.httpStatus}).`
-      : "The crash event service returned an error.";
+      : "The Signal4 Beam crash event service returned an error.";
   let details = typeof error?.details === "string" ? error.details : undefined;
   if (result.httpStatus === 401) {
     message = "The access token was rejected or has expired.";
@@ -1013,8 +1161,8 @@ function localTimestamp(date: Date): string {
 }
 
 async function widenWindow() {
-  const host = window as Window & { __TAURI_INTERNALS__?: unknown };
-  if (!host.__TAURI_INTERNALS__) return;
+  const { isTauri } = await import("./is-tauri.ts");
+  if (!isTauri()) return;
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const { LogicalSize } = await import("@tauri-apps/api/dpi");

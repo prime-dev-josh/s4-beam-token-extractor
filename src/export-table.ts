@@ -106,6 +106,20 @@ export function downloadBlob(filename: string, blob: Blob) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Where the browser or desktop shell is expected to place the file. */
+export async function resolveDownloadLocation(filename: string): Promise<string> {
+  const { isTauri } = await import("./is-tauri.ts");
+  if (isTauri()) {
+    try {
+      const { downloadDir, join } = await import("@tauri-apps/api/path");
+      return await join(await downloadDir(), filename);
+    } catch {
+      // Still show a useful path if the path API is unavailable.
+    }
+  }
+  return `${filename} · your browser's default download folder (usually Downloads)`;
+}
+
 export function exportFilename(kind: "csv" | "pdf", page: number | null): string {
   const stamp = localStamp(new Date());
   const pagePart = page != null ? `-page-${page}` : "";

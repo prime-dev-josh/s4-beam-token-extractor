@@ -118,7 +118,8 @@ export function parsePageRange(
       error: {
         field: "page",
         message: "Page range end must be at or after the start.",
-        details: "Each Beam page holds 500 records. The range is inclusive, and Search fetches every page in it.",
+        details:
+          "Each Signal4 Beam page holds 500 records. The range is inclusive, and Search fetches every page in it.",
       },
     };
   }

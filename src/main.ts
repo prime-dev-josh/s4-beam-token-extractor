@@ -1,6 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { isTauri } from "./is-tauri.ts";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { initExportAlert } from "./export-alert.ts";
 import { initSearch } from "./search.ts";
 import { go, initRouter } from "./router.ts";
 import { initTheme } from "./theme.ts";
@@ -23,6 +24,7 @@ initTheme();
 initRouter();
 initNavSession();
 initSettings();
+initExportAlert();
 
 const fileNameEl = document.querySelector<HTMLParagraphElement>("#file-name")!;
 const dropzone = document.querySelector<HTMLDivElement>("#dropzone")!;
@@ -79,7 +81,7 @@ async function chooseFile() {
   const selected = await open({
     multiple: false,
     directory: false,
-    title: "Choose encrypted Beam credentials",
+    title: "Choose encrypted Signal4 Beam credentials",
     filters: [
       { name: "Encrypted credentials", extensions: ["asc"] },
       { name: "All files", extensions: ["*"] },
@@ -105,6 +107,7 @@ async function decrypt() {
   setBusy(true);
   setStatus("");
   try {
+    const { invoke } = await import("@tauri-apps/api/core");
     const summary = await invoke<CredentialSummary>("unlock_credentials", {
       path: selectedPath,
       passphrase: passphraseEl.value,
@@ -133,6 +136,7 @@ async function requestToken() {
   setBusy(true);
   setStatus("");
   try {
+    const { invoke } = await import("@tauri-apps/api/core");
     const token = await invoke<TokenInfo>("request_token");
     tokenEl.value = token.accessToken;
     const kind = token.tokenType || "Bearer";
@@ -209,8 +213,7 @@ subscribe((session) => {
   }
 });
 
-const tauriWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
-if (tauriWindow.__TAURI_INTERNALS__) {
+if (isTauri()) {
   void getCurrentWebview().onDragDropEvent((event) => {
     if (event.payload.type === "enter") {
       dropzone.classList.add("hot");
